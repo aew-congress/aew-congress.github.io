@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://aew-caraga.github.io";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://aew-congress.github.io";
 const shareTitle = "AEW Congress | Programs & Learning Materials";
 const shareDescription = "AEW Congress recognizes, empowers, and supports agricultural and fishery extension workers and beyond.";
 

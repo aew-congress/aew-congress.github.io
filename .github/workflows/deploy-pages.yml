@@ -18,6 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      NEXT_PUBLIC_SITE_URL: https://aew-congress.github.io
       NEXT_PUBLIC_UPLOADTHING_URL: https://aew-congress-uploadthing.ps-taguibo-uploadthing-worker.workers.dev/api/uploadthing
     steps:
       - name: Check out repository

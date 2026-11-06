@@ -9,7 +9,7 @@ import {
   sendPasswordResetEmail, signInWithEmailAndPassword, signOut, User,
 } from "firebase/auth";
 import {
-  ArrowDownRight, ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
+  ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
@@ -59,6 +59,17 @@ function nameInitials(person: Partial<UserProfile>) {
 function profileRole(profile: Partial<UserProfile>): UserRole {
   if (profile.email?.toLowerCase() === SUPERADMIN_EMAIL) return "superadmin";
   return profile.role ?? "regular";
+}
+
+function philippineGreeting(date: Date) {
+  const hour = Number(new Intl.DateTimeFormat("en-PH", {
+    hour: "numeric",
+    hourCycle: "h23",
+    timeZone: "Asia/Manila",
+  }).format(date));
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 const emptyResponsiblePerson = (): ResponsiblePerson => ({ name: "", designation: "", office: "" });
@@ -189,6 +200,7 @@ export default function Experience() {
   const [selectedDay, setSelectedDay] = useState(0);
   const [trackFilter, setTrackFilter] = useState<string>("All tracks");
   const [search, setSearch] = useState("");
+  const [hoveredTimeGroup, setHoveredTimeGroup] = useState<number | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -239,7 +251,8 @@ export default function Experience() {
   }, [days, selectedDay, selectedProgram, search, trackFilter]);
 
   const scheduleRows = useMemo(() => {
-    const rows: { item: ProgramSession; timeRowSpan: number }[] = [];
+    const rows: { item: ProgramSession; timeRowSpan: number; timeGroup: number }[] = [];
+    let timeGroup = 0;
     for (let index = 0; index < filteredSessions.length;) {
       const item = filteredSessions[index];
       const time = sessionTimeRange(item);
@@ -252,11 +265,12 @@ export default function Experience() {
           groupEnd += 1;
         }
       }
-      rows.push({ item, timeRowSpan: groupEnd - index });
+      rows.push({ item, timeRowSpan: groupEnd - index, timeGroup });
       for (let groupedIndex = index + 1; groupedIndex < groupEnd; groupedIndex += 1) {
-        rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0 });
+        rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0, timeGroup });
       }
       index = groupEnd;
+      timeGroup += 1;
     }
     return rows;
   }, [filteredSessions]);
@@ -939,23 +953,7 @@ export default function Experience() {
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
           <>
-            {section === "home" && <section className="hero content-wrap">
-              <div className="hero-copy">
-                <span className="eyebrow"><span className="eyebrow-dot" />A shared space for learning</span>
-                <h1>Good programs<br /><span>make room</span> for <i>growth.</i></h1>
-                <p>Explore published learning sessions, follow the daily flow, and find resources shared by the community.</p>
-                <div className="hero-actions"><button className="button button--olive" onClick={() => setSection("programs")}>Explore programs <ArrowDownRight size={17} /></button><button className="text-action" onClick={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }}>{signedIn ? "Browse materials" : "Member access"} <ArrowRight size={16} /></button></div>
-                <div className="hero-note"><Leaf size={17} /><span>For agricultural extension workers<br /><strong>across the Caraga Region.</strong></span></div>
-              </div>
-              <div className="hero-art" aria-hidden="true">
-                <div className="art-sun" />
-                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><img src="/AEW_logo.png" alt="" /></div><span className="art-year">AEW CONGRESS</span></div>
-                <div className="art-card art-card--front"><div className="art-leaf"><img src="/AEW_logo.png" alt="" /></div><span className="mini-label">CARAGA REGION XIII</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail">Shared knowledge for stronger communities</span></div>
-                <div className="art-sticker"><Sparkles size={15} /><span>Curiosity<br />in action</span></div>
-                <span className="art-caption">LEARN / SHARE / GROW</span>
-              </div>
-              <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>AEW CONGRESS / REGION XIII</span></div>
-            </section>}
+            {section === "home" && <HomeLanding onExplorePrograms={() => setSection("programs")} onMemberAccess={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }} />}
 
             {section === "programs" && <>
             <section className="content-wrap program-section" id="program-list">
@@ -973,7 +971,7 @@ export default function Experience() {
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
-                {scheduleRows.map(({ item, timeRowSpan }, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
+                {scheduleRows.map(({ item, timeRowSpan, timeGroup }, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>
@@ -996,6 +994,54 @@ export default function Experience() {
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
   );
+}
+
+function HomeLanding({ onExplorePrograms, onMemberAccess }: { onExplorePrograms: () => void; onMemberAccess: () => void }) {
+  const objectives = [
+    { icon: BadgeCheck, title: "Honoring & Acknowledging Frontliners", description: "Recognize the people connecting institutions, programs, and local communities." },
+    { icon: Sparkles, title: "Capacity Building & Knowledge Updates", description: "Bring current research, practices, and useful tools into extension work." },
+    { icon: ShieldCheck, title: "Policy & Welfare Discussions", description: "Create space for policies, working conditions, and the support AEWs need." },
+    { icon: UsersRound, title: "Strengthening Networks & Coordination", description: "Connect agencies, research institutions, and local practitioners across the region." },
+  ];
+
+  return <div className="landing-page">
+    <section className="landing-hero">
+      <div className="content-wrap landing-hero-inner">
+        <div className="landing-hero-copy">
+          <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · AEW CONGRESS 2026</span>
+          <h1>Recognizing the people who help agriculture <span>thrive.</span></h1>
+          <p>The Agricultural Extension Worker (AEW) Congress recognizes, empowers, and supports agricultural and fishery extension workers—the vital frontliners connecting research institutions and government agencies with local farming and fishing communities.</p>
+          <div className="landing-hero-actions">
+            <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
+            <button className="text-action" onClick={onMemberAccess}>Member access <ArrowRight size={16} /></button>
+          </div>
+          <div className="landing-event-facts">
+            <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>November 11–13, 2026</strong></span></div>
+            <div className="landing-event-fact"><span className="landing-fact-icon"><MapPin size={18} /></span><span><small>VENUE</small><strong>Balanghai Hotel and Convention Center<br />Butuan City 8600</strong></span></div>
+          </div>
+        </div>
+        <figure className="landing-hero-photo">
+          <img src="/p1.jpg" alt="An agricultural extension worker speaking at a congress" />
+          <span className="landing-photo-badge"><strong>AEW CONGRESS</strong><small>CARAGA REGION XIII</small></span>
+          <figcaption><span>RECOGNIZE · EMPOWER · SUPPORT</span><strong>Frontliners bridging knowledge and community</strong></figcaption>
+        </figure>
+        <div className="landing-theme-banner"><span className="landing-theme-icon"><Sparkles size={18} /></span><span className="landing-theme-copy"><small>THIS YEAR’S THEME</small><strong>Advancing Agricultural Extension Towards Sustainable Agri-Food Systems and Inclusive Growth.</strong></span><span className="landing-theme-year">2026</span></div>
+      </div>
+    </section>
+
+    <section className="landing-objectives content-wrap">
+      <div className="landing-section-heading"><div><span className="eyebrow">WHY WE GATHER</span><h2>Stronger support for the people<br /><span>serving our communities.</span></h2></div><p>AEWs bridge research, government services, and the everyday needs of farming and fishing communities. The Congress brings that work into focus.</p></div>
+      <div className="landing-objective-grid">{objectives.map(({ icon: Icon, title, description }, index) => <article className="landing-objective-card" key={title}><span className="landing-objective-number">{String(index + 1).padStart(2, "0")}</span><span className="landing-objective-icon"><Icon size={19} /></span><h3>{title}</h3><p>{description}</p></article>)}</div>
+    </section>
+
+    <section className="landing-gallery content-wrap">
+      <div className="landing-gallery-heading"><div><span className="eyebrow">A COMMUNITY IN ACTION</span><h2>Learning, sharing, <span>moving forward.</span></h2></div><p>Every Congress creates room for recognition, new ideas, open discussion, and stronger regional connections.</p></div>
+      <div className="landing-gallery-grid">
+        <figure className="landing-gallery-card"><img src="/p2.jpg" alt="A speaker addresses agricultural extension workers at a congress" /><figcaption><span>KNOWLEDGE SHARED</span><strong>Learning from one another</strong></figcaption></figure>
+        <figure className="landing-gallery-card"><img src="/p3.jpg" alt="Agricultural extension workers gathered for a regional congress" /><figcaption><span>REGIONAL CONNECTIONS</span><strong>Stronger together</strong></figcaption></figure>
+      </div>
+    </section>
+  </div>;
 }
 
 function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
@@ -1051,10 +1097,17 @@ function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, on
   profiles: UserProfile[]; loading: boolean; onChangeRole: (profile: UserProfile, role: UserRole) => void; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
 }) {
   const [filter, setFilter] = useState("Pending");
+  const [philippineNow, setPhilippineNow] = useState<Date | null>(null);
+  useEffect(() => {
+    const refreshClock = () => setPhilippineNow(new Date());
+    refreshClock();
+    const interval = window.setInterval(refreshClock, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const verifiedProfiles = profiles.filter((profile) => profile.emailVerified === true);
   const filtered = verifiedProfiles.filter((profile) => filter === "All" || profile.status === filter).sort((a, b) => (a.status === "Pending" ? -1 : 1));
   const counts = { Pending: verifiedProfiles.filter((p) => p.status === "Pending").length, Approved: verifiedProfiles.filter((p) => p.status === "Approved").length, Disapproved: verifiedProfiles.filter((p) => p.status === "Disapproved").length };
-  return <div className="content-wrap dashboard-page"><div className="dashboard-welcome"><div><span className="eyebrow"><ShieldCheck size={14} /> SUPERADMIN WORKSPACE</span><h1>Good morning,<br /><span>let’s keep things</span> <i>moving.</i></h1><p>Manage registrations, shape the program calendar, and keep resources organized.</p></div><div className="dashboard-date"><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date()).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric" }).format(new Date())}</strong><small>CARAGA · REGION XIII</small></div></div>
+  return <div className="content-wrap dashboard-page"><div className="dashboard-welcome"><div><span className="eyebrow"><ShieldCheck size={14} /> SUPERADMIN WORKSPACE</span><h1>{philippineNow ? philippineGreeting(philippineNow) : "Welcome"},<br /><span>let’s keep things</span> <i>moving.</i></h1><p>Manage registrations, shape the program calendar, and keep resources organized.</p></div><div className="dashboard-date"><span>{philippineNow ? new Intl.DateTimeFormat("en-PH", { weekday: "long", timeZone: "Asia/Manila" }).format(philippineNow).toUpperCase() : "PHILIPPINE TIME"}</span><strong>{philippineNow ? new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric", timeZone: "Asia/Manila" }).format(philippineNow) : "—"}</strong><small>CARAGA · REGION XIII</small></div></div>
     <div className="admin-stats"><div className="admin-stat admin-stat--highlight"><span className="stat-label">NEEDS REVIEW</span><strong>{String(counts.Pending).padStart(2, "0")}</strong><span className="stat-foot"><span className="online-dot" />Pending registrations</span></div><div className="admin-stat"><span className="stat-label">APPROVED USERS</span><strong>{String(counts.Approved).padStart(2, "0")}</strong><span className="stat-foot">Cleared for sign-in</span></div><div className="admin-stat"><span className="stat-label">NOT APPROVED</span><strong>{String(counts.Disapproved).padStart(2, "0")}</strong><span className="stat-foot">Can be reviewed again</span></div><div className="admin-stat admin-quick-actions"><span className="stat-label">QUICK ACTIONS</span><button onClick={onAddProgram}><Plus size={15} /> Create a program <ArrowUpRight size={14} /></button><button onClick={onAddMaterial}><Plus size={15} /> Add a material <ArrowUpRight size={14} /></button></div></div>
     <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User approval <span>& directory</span></h2><p>Verified accounts appear here as Pending. Approve an account to unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
       <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>STATUS</th></tr></thead><tbody>

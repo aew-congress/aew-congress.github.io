@@ -939,7 +939,7 @@ export default function Experience() {
       <header className="topbar">
         <a href="#top" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
           <span className="brand-mark"><img src="/AEW_logo.png" alt="" /></span>
-          <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>PROGRAMS & MATERIALS</small></span>
+          <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
         </a>
         <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
           {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}

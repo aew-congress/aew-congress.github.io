@@ -211,6 +211,21 @@ export default function Experience() {
 
   function showError(error: unknown) { setToast({ kind: "error", text: errorText(error) }); }
 
+  async function getVerifiedSuperadmin() {
+    const current = auth.currentUser;
+    if (!current) throw new Error(`Sign in with the superadmin account (${SUPERADMIN_EMAIL}) to make this change.`);
+    await current.reload();
+    const token = await current.getIdTokenResult(true);
+    const tokenEmail = String(token.claims.email ?? current.email ?? "").trim().toLowerCase();
+    if (tokenEmail !== SUPERADMIN_EMAIL) {
+      throw new Error(`This session is signed in as ${tokenEmail || "an unknown account"}. Sign in as ${SUPERADMIN_EMAIL} to make this change.`);
+    }
+    if (token.claims.email_verified !== true) {
+      throw new Error(`Verify ${SUPERADMIN_EMAIL}, then sign out and sign in again before making this change.`);
+    }
+    return current;
+  }
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -339,19 +354,22 @@ export default function Experience() {
       description: String(form.get("description")).trim(),
       flow,
       createdAt: serverTimestamp(),
-      createdBy: user?.uid,
     };
     if (payload.dateTo < payload.dateFrom) { setToast({ kind: "error", text: "The end date must be on or after the start date." }); return; }
     try {
-      await user.getIdToken(true);
-      const created = await addDoc(collection(db, "programs"), payload);
+      const adminUser = await getVerifiedSuperadmin();
+      const created = await addDoc(collection(db, "programs"), { ...payload, createdBy: adminUser.uid });
       setSelectedProgramId(created.id);
       setSection("programs");
       setProgramModal(false);
       setToast({ kind: "success", text: "Program published." });
     } catch (error) {
       if ((error as { code?: string })?.code === "permission-denied") {
-        setToast({ kind: "error", text: "Firestore denied this program write. Confirm the verified superadmin account is signed in and the latest Firestore rules are deployed." });
+        const current = auth.currentUser;
+        const token = current ? await current.getIdTokenResult() : null;
+        const actualEmail = String(token?.claims.email ?? current?.email ?? "no signed-in account");
+        const verified = token?.claims.email_verified === true;
+        setToast({ kind: "error", text: `Firestore rejected this program write for ${actualEmail} (verified email: ${verified ? "yes" : "no"}). The required superadmin is ${SUPERADMIN_EMAIL}.` });
         return;
       }
       showError(error);
@@ -361,6 +379,9 @@ export default function Experience() {
   async function createMaterial(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
+    let adminUser: User;
+    try { adminUser = await getVerifiedSuperadmin(); }
+    catch (error) { showError(error); return; }
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const targetProgram = programs.find((program) => program.id === String(form.get("programId")));
@@ -379,7 +400,7 @@ export default function Experience() {
       try {
         const result = await uploadFiles("materialUploader", {
           files: [file],
-          headers: async () => ({ Authorization: `Bearer ${await user.getIdToken()}` }),
+          headers: async () => ({ Authorization: `Bearer ${await adminUser.getIdToken()}` }),
         });
         url = result[0]?.ufsUrl ?? "";
         name = name || file.name;
@@ -395,7 +416,7 @@ export default function Experience() {
         name: name || url.split("/").pop() || "Program resource",
         url,
         createdAt: serverTimestamp(),
-        createdBy: user.uid,
+        createdBy: adminUser.uid,
       });
       formElement.reset();
       setMaterialModal(false);
@@ -424,7 +445,7 @@ export default function Experience() {
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
     const mechanicsRef = doc(db, "contestMechanics", contestId);
     try {
-      await user.getIdToken(true);
+      const adminUser = await getVerifiedSuperadmin();
       await runTransaction(db, async (transaction) => {
         const existing = await transaction.get(mechanicsRef);
         const newCriterion = { criteria: criterion, description, weight };
@@ -444,7 +465,7 @@ export default function Experience() {
             contest,
             criteria: [newCriterion],
             createdAt: serverTimestamp(),
-            createdBy: user.uid,
+            createdBy: adminUser.uid,
           });
         }
       });

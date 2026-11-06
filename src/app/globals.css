@@ -66,7 +66,7 @@ a { color: inherit; text-decoration: none; }
 .button--wide { width: 100%; height: 47px; }
 .text-action { background: transparent; border: 0; color: var(--olive); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 9px 0; transition: gap .18s ease; }
 .text-action:hover { gap: 13px; }
-.hero-note { display: flex; gap: 11px; align-items: center; position: absolute; bottom: -16px; left: 4px; color: #828879; font-size: 10px; line-height: 1.5; }
+.hero-note { display: flex; gap: 11px; align-items: center; position: static; margin-top: 28px; color: #828879; font-size: 10px; line-height: 1.5; }
 .hero-note strong { color: #4d5740; font-size: 10px; }
 .hero-art { height: 415px; max-width: 485px; width: 100%; justify-self: end; position: relative; perspective: 700px; }
 .art-sun { position: absolute; right: 62px; top: 5px; width: 286px; height: 286px; border-radius: 50%; background: #feca24; opacity: .94; box-shadow: inset -10px -12px 26px #dfaa1e22, 0 18px 40px #cfad4520; animation: rise-in .8s both ease-out; }
@@ -84,7 +84,7 @@ a { color: inherit; text-decoration: none; }
 .art-detail { display: flex; gap: 5px; align-items: center; font-size: 9px; color: #777d70; margin-top: 10px; }
 .art-sticker { position: absolute; display: flex; gap: 8px; align-items: center; right: 34px; bottom: 35px; transform: rotate(-7deg); background: var(--olive); color: #fff; padding: 11px 13px; border-radius: 8px; font: 11px/1.25 Georgia, serif; box-shadow: 4px 6px 13px #32430f32; }
 .art-caption { position: absolute; right: 2px; top: 57px; color: #728051; font-size: 7px; font-weight: 800; letter-spacing: .2em; transform: rotate(7deg); }
-.hero-bottomline { position: absolute; bottom: 0; height: 43px; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; color: #929789; font-size: 8px; font-weight: 800; letter-spacing: .16em; }
+.hero-bottomline { grid-column: 1 / -1; position: static; height: 43px; display: flex; justify-content: space-between; align-items: center; color: #929789; font-size: 8px; font-weight: 800; letter-spacing: .16em; }
 .hero-bottomline i { color: var(--yellow); font-style: normal; margin: 0 4px; }
 
 .program-section { padding-top: 86px; padding-bottom: 76px; }

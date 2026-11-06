@@ -15,7 +15,7 @@ import {
   Menu, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
-import { uploadFiles } from "@/lib/uploadthing";
+import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
 type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Opening" | "Plenary";
@@ -116,6 +116,69 @@ function responsiblePeople(value: ProgramSession["responsible"]): ResponsiblePer
 
 function responsibleSearchText(value: ProgramSession["responsible"]) {
   return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
+}
+
+function csvCell(value: string) {
+  const safeValue = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safeValue.replaceAll('"', '""')}"`;
+}
+
+function programScheduleCsv(program: Program, sessions: ProgramSession[], dayNumber: number) {
+  const rows = [["Event title", "Theme", "Venue", "Date", "Day", "Start time", "End time", "Session", "Track", "Responsible", "Designation", "Office"]];
+  for (const session of sessions) {
+    const people = session.responsibleNotApplicable
+      ? []
+      : session.allParticipants
+        ? [{ name: "All Participants", designation: "", office: "" }]
+        : responsiblePeople(session.responsible).filter((person) => person.name || person.designation || person.office);
+    const { startTime, endTime } = sessionTimeRange(session);
+    rows.push([
+      program.eventTitle,
+      program.theme ?? "",
+      program.venue,
+      session.date,
+      `Day ${String(dayNumber).padStart(2, "0")}`,
+      startTime ? formatTimeValue(startTime) : "",
+      endTime ? formatTimeValue(endTime) : "",
+      session.session,
+      session.track,
+      people.map((person) => person.name).join("; "),
+      people.map((person) => person.designation).join("; "),
+      people.map((person) => person.office).join("; "),
+    ]);
+  }
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+}
+
+function saveDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function materialFilename(material: Material) {
+  const name = material.name.trim() || "program-material";
+  if (/\.[a-z0-9]{1,8}$/i.test(name)) return name;
+  try {
+    const pathname = new URL(material.url).pathname;
+    const extension = pathname.match(/\.([a-z0-9]{1,8})$/i)?.[1];
+    return extension ? `${name}.${extension}` : name;
+  } catch { return name; }
+}
+
+function isUploadThingFile(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const uploadThingHost = ["ufs.sh", "utfs.io"].some((domain) => host === domain || host.endsWith(`.${domain}`));
+    return url.protocol === "https:" && uploadThingHost && url.pathname.startsWith("/f/");
+  } catch { return false; }
 }
 
 function SessionResponsibleDisplay({ item }: { item: ProgramSession }) {
@@ -312,6 +375,31 @@ export default function Experience() {
   }, [toast]);
 
   function showError(error: unknown) { setToast({ kind: "error", text: errorText(error) }); }
+
+  async function downloadMaterial(material: Material) {
+    if (!isUploadThingFile(material.url)) {
+      const anchor = document.createElement("a");
+      anchor.href = material.url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.download = materialFilename(material);
+      anchor.click();
+      setToast({ kind: "info", text: "This is an external resource. Its host controls whether it opens or downloads." });
+      return;
+    }
+
+    try {
+      const url = new URL(uploadthingDownloadEndpoint);
+      url.searchParams.set("url", material.url);
+      url.searchParams.set("name", materialFilename(material));
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error("The file could not be downloaded. Please try again.");
+      const filename = response.headers.get("content-disposition")?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const safeFilename = filename ? decodeURIComponent(filename) : materialFilename(material);
+      saveDownload(await response.blob(), safeFilename);
+      setToast({ kind: "success", text: `Download started: ${safeFilename}` });
+    } catch (error) { showError(error); }
+  }
 
   function openProgramEditor(program: Program | null = null) { setEditingProgram(program); setProgramModal(true); }
   function openMaterialEditor(material: Material | null = null) { setEditingMaterial(material); setMaterialModal(true); }
@@ -772,7 +860,7 @@ export default function Experience() {
         ) : section === "contests" && isApprovedMember ? (
           <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
         ) : section === "materials" ? (
-          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} loading={loading} />
+          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
           <>
             {section === "home" && <section className="hero content-wrap">
@@ -812,10 +900,14 @@ export default function Experience() {
                 {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{sessionTimeLabel(item)}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
-              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button onClick={() => window.print()}><Download size={15} /> Print schedule</button></div>
+              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Download the displayed schedule as a CSV file" onClick={() => {
+                const programSlug = selectedProgram.eventTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "program";
+                const filename = `${programSlug}-day-${String(selectedDay + 1).padStart(2, "0")}-schedule.csv`;
+                saveDownload(new Blob([programScheduleCsv(selectedProgram, filteredSessions, selectedDay + 1)], { type: "text/csv;charset=utf-8" }), filename);
+              }}><Download size={15} /> Download schedule</button></div>
             </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
 
-            {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} />}
+            {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} onDownload={downloadMaterial} />}
             {cloudIssue && <div className="content-wrap cloud-notice"><CircleHelp size={16} /><span>Live data isn’t connected yet. {cloudIssue === "Missing or insufficient permissions." ? "Add the provided Firestore rules and enable sign-in in Firebase." : cloudIssue}</span></div>}
             </>}
           </>
@@ -990,7 +1082,7 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
   </form></div></div>;
 }
 
-function MaterialsPage({ materials, programs, isAdmin, onAdd, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; onAdd: () => void; loading: boolean }) {
+function MaterialsPage({ materials, programs, isAdmin, onAdd, onDownload, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; onAdd: () => void; onDownload: (material: Material) => void; loading: boolean }) {
   const [category, setCategory] = useState("All resources");
   const [program, setProgram] = useState("All programs");
   const [queryText, setQueryText] = useState("");
@@ -999,14 +1091,14 @@ function MaterialsPage({ materials, programs, isAdmin, onAdd, loading }: { mater
   return <div className="content-wrap materials-page"><section className="materials-hero"><div><span className="eyebrow"><FileCheck2 size={14} /> THE RESOURCE SHELF</span><h1>Useful things,<br /><span>within</span> <i>reach.</i></h1><p>Presentations, guides, worksheets, and references shared by the Caraga extension community.</p></div><div className="materials-hero-art"><span className="paper paper--one"><FileText size={22} /><b>FIELD<br />GUIDE</b><i /></span><span className="paper paper--two"><span>01</span><strong>Learn<br />by doing.</strong><i /></span><span className="paper paper--three"><Sparkles size={16} /><small>SHARED<br />KNOWLEDGE</small></span></div></section>
     <div className="resource-toolbar"><label className="search-box"><Search size={16} /><input value={queryText} onChange={(event) => setQueryText(event.target.value)} placeholder="Search materials" aria-label="Search materials" /></label><label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => setProgram(event.target.value)} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>{isAdmin && <button className="button button--olive" onClick={onAdd}><Upload size={16} /> Add material</button>}</div>
     <div className="resource-categories"><button className={category === "All resources" ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory("All resources")}>All resources <span>{materials.length}</span></button>{categories.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory(item)}>{item}<span>{materials.filter((m) => m.category === item).length}</span></button>)}</div>
-    <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />Available to all members</span><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={17} /></a></div></article>)}
+    <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />Available to all members</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
     </div><div className="materials-footnote"><Leaf size={16} /><span>Know something useful? Share it with the team and help good ideas travel.</span></div>
   </div>;
 }
 
-function MaterialsTeaser({ materials, onOpen }: { materials: Material[]; onOpen: () => void }) {
-  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find guides, presentations, and worksheets shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><span className="shelf-open"><ArrowUpRight size={15} /></span></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
+function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Material[]; onOpen: () => void; onDownload: (material: Material) => void }) {
+  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find guides, presentations, and worksheets shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item)} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
 function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {

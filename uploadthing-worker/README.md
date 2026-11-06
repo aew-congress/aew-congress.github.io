@@ -18,3 +18,5 @@ https://aew-congress-uploadthing.ps-taguibo-uploadthing-worker.workers.dev/api/u
 ```
 
 The GitHub Pages workflow sets `NEXT_PUBLIC_UPLOADTHING_URL` to this endpoint at build time. If you deploy under another URL, update that workflow value and the local default in `src/lib/uploadthing.ts`.
+
+The same Worker exposes `/api/download` for uploaded files. It accepts only HTTPS UploadThing file URLs (`ufs.sh` or `utfs.io`) and streams them with an attachment filename so the browser downloads them directly. The schedule download is generated in the browser as a CSV file.

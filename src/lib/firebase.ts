@@ -53,6 +53,8 @@ export type ProgramSession = {
 export type Program = {
   id: string;
   eventTitle: string;
+  /** Optional for previously saved programs that predate theme support. */
+  theme?: string;
   dateFrom: string;
   dateTo: string;
   venue: string;

@@ -122,7 +122,8 @@ function SessionResponsibleDisplay({ item }: { item: ProgramSession }) {
   if (item.responsibleNotApplicable) return null;
   if (item.allParticipants) return <span className="all-participants-value">All Participants</span>;
   const people = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office);
-  return <div className="session-person-list">{people.length ? people.map((person, personIndex) => <span key={`${person.name}-${personIndex}`}><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>) : "—"}</div>;
+  if (!people.length) return null;
+  return <div className="session-person-list">{people.map((person, personIndex) => <span key={`${person.name}-${personIndex}`}><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>)}</div>;
 }
 
 function errorText(error: unknown) {

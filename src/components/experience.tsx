@@ -53,17 +53,6 @@ function profileRole(profile: Partial<UserProfile>): UserRole {
   return profile.role ?? "regular";
 }
 
-function passwordScore(value: string) {
-  if (!value) return 0;
-  let score = 0;
-  if (value.length >= 8) score++;
-  if (value.length >= 12) score++;
-  if (/[a-z]/.test(value) && /[A-Z]/.test(value)) score++;
-  if (/\d/.test(value)) score++;
-  if (/[^A-Za-z0-9]/.test(value)) score++;
-  return Math.min(score, 5);
-}
-
 const emptyResponsiblePerson = (): ResponsiblePerson => ({ name: "", designation: "", office: "" });
 
 function parseTimeValue(value: string | undefined) {
@@ -161,7 +150,7 @@ function errorText(error: unknown) {
   const code = (error as { code?: string })?.code;
   if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") return "That email and password combination could not be verified.";
   if (code === "auth/email-already-in-use") return "An account already uses this email address. Try signing in instead.";
-  if (code === "auth/weak-password") return "Choose a stronger password with at least 8 characters.";
+  if (code === "auth/weak-password") return "Choose a password with at least 6 characters.";
   if (code === "auth/too-many-requests") return "Too many attempts. Please wait a little and try again.";
   if (code === "auth/network-request-failed") return "Check your internet connection and try again.";
   if (code === "permission-denied") return "This action is not allowed for your account.";
@@ -466,7 +455,7 @@ export default function Experience() {
     const phone = String(form.get("phone")).replace(/\D/g, "");
     if (email === SUPERADMIN_EMAIL) { setToast({ kind: "error", text: "The superadmin account must be provisioned through Firebase Authentication." }); return; }
     if (password !== confirmation) { setToast({ kind: "error", text: "The passwords do not match." }); return; }
-    if (passwordScore(password) < 3) { setToast({ kind: "error", text: "Choose a stronger password before creating your account." }); return; }
+    if (password.length < 6) { setToast({ kind: "error", text: "Choose a password with at least 6 characters." }); return; }
     if (phone.length !== 9) { setToast({ kind: "error", text: "Enter the 9 digits after +63 9." }); return; }
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password);
@@ -900,8 +889,6 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
   const [confirmation, setConfirmation] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const score = passwordScore(password);
-  const labels = ["Very weak", "Weak", "So-so", "Good", "Great!"];
   const today = new Date().toISOString().slice(0, 10);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="auth-modal" role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
@@ -926,8 +913,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
           <div className="form-grid form-grid--three"><Field label="Birthdate"><input type="date" name="birthdate" max={today} required /></Field><Field label="Sex at birth"><select name="sexAtBirth" required defaultValue=""><option value="" disabled>Select</option><option>Male</option><option>Female</option></select></Field><Field label="Contact number"><div className="phone-input"><span>+63 9</span><input name="phone" inputMode="numeric" autoComplete="tel-national" value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 9))} placeholder="XX XXX XXXX" maxLength={9} required /></div></Field></div>
           <div className="form-section-label form-section-label--spaced">WORK DETAILS <span>02 / 02</span></div>
           <div className="form-grid form-grid--three"><Field label="Position"><input name="position" placeholder="e.g. Agriculturist II" required /></Field><Field label="Designation"><input name="designation" placeholder="e.g. Municipal AEW" required /></Field><Field label="Office"><input name="office" placeholder="Office or organization" required /></Field></div>
-          <div className="form-grid form-grid--three"><Field label="Email address"><input type="email" name="email" autoComplete="email" placeholder="you@office.gov.ph" required /></Field><Field label="Password"><div className="password-field"><input type={showPassword ? "text" : "password"} name="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={8} required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field><Field label="Confirm password"><div className="password-field"><input type={showConfirmation ? "text" : "password"} name="confirmation" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Re-enter password" required /><button className="password-toggle" type="button" onClick={() => setShowConfirmation((value) => !value)} aria-label={showConfirmation ? "Hide password" : "Show password"}>{showConfirmation ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field></div>
-          {password && <div className="strength-wrap"><div className="strength-bars">{Array.from({ length: 5 }, (_, index) => <span key={index} className={index < score ? `strength-fill strength-fill--${score}` : ""} />)}</div><span className={`strength-label strength-label--${score}`}>{labels[Math.max(0, score - 1)]}</span>{confirmation && <span className={confirmation === password ? "match-note match-note--yes" : "match-note"}>{confirmation === password ? "Passwords match" : "Passwords do not match"}</span>}</div>}
+          <div className="form-grid form-grid--three"><Field label="Email address"><input type="email" name="email" autoComplete="email" placeholder="you@office.gov.ph" required /></Field><Field label="Password"><div className="password-field"><input type={showPassword ? "text" : "password"} name="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field><Field label="Confirm password"><div className="password-field"><input type={showConfirmation ? "text" : "password"} name="confirmation" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Re-enter password" required /><button className="password-toggle" type="button" onClick={() => setShowConfirmation((value) => !value)} aria-label={showConfirmation ? "Hide password" : "Show password"}>{showConfirmation ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field></div>
           <p className="privacy-note"><LockKeyhole size={13} /> Registration details are visible only to authorized administrators.</p>
           <button className="button button--olive button--wide" type="submit">Submit for approval <ArrowRight size={16} /></button>
           <p className="auth-switch">Already registered? <button type="button" onClick={() => setMode("login")}>Log in</button></p>

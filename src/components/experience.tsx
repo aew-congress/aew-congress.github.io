@@ -516,8 +516,9 @@ export default function Experience() {
           setAuthOpen(false);
           return;
         }
-        setSection("approval");
+        setSection("home");
         setAuthOpen(false);
+        setToast({ kind: "success", text: "Welcome, Superadmin." });
         return;
       }
       const profileSnapshot = await getDoc(doc(db, "userProfiles", credential.user.uid));
@@ -535,7 +536,7 @@ export default function Experience() {
           return;
         }
         setActiveProfile(profile);
-        setSection("approval");
+        setSection("home");
         setAuthOpen(false);
         setToast({ kind: "success", text: `Welcome, ${profile.firstName}.` });
         return;
@@ -571,7 +572,7 @@ export default function Experience() {
         setAuthOpen(false);
         return;
       }
-      setSection("programs");
+      setSection("home");
       setAuthOpen(false);
       setToast({ kind: "success", text: `Welcome back, ${verifiedProfile.firstName}.` });
     } catch (error) {

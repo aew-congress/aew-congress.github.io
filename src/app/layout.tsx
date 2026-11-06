@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AEW Caraga | Programs & Learning Materials",
-  description: "Programs, daily session flows, and learning materials for AEW Caraga.",
+  title: "AEW Congress | Programs & Learning Materials",
+  description: "Programs, daily session flows, and learning materials for AEW Congress.",
   icons: {
     icon: "/AEW_logo.png",
     shortcut: "/AEW_logo.png",

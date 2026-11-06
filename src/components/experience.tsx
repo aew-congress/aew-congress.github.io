@@ -680,9 +680,9 @@ export default function Experience() {
   return (
     <div className="site-shell">
       <header className="topbar">
-        <a href="#top" className="brand" aria-label="AEW Caraga home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
+        <a href="#top" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
           <span className="brand-mark"><img src="/AEW_logo.png" alt="" /></span>
-          <span className="brand-wording"><strong>AEW <em>CARAGA</em></strong><small>PROGRAMS & MATERIALS</small></span>
+          <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>PROGRAMS & MATERIALS</small></span>
         </a>
         <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
           {navItems.map((item) => <button key={item.id} className={section === item.id || (section === "home" && item.id === "programs") ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
@@ -716,12 +716,12 @@ export default function Experience() {
               </div>
               <div className="hero-art" aria-hidden="true">
                 <div className="art-sun" />
-                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><Leaf size={25} /></div><span className="art-year">AEW CARAGA</span></div>
+                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><Leaf size={25} /></div><span className="art-year">AEW CONGRESS</span></div>
                 <div className="art-card art-card--front"><div className="art-leaf"><Leaf size={25} /></div><span className="mini-label">CARAGA REGION XIII</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail">Shared knowledge for stronger communities</span></div>
                 <div className="art-sticker"><Sparkles size={15} /><span>Curiosity<br />in action</span></div>
                 <span className="art-caption">LEARN / SHARE / GROW</span>
               </div>
-              <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>AEW CARAGA / REGION XIII</span></div>
+              <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>AEW CONGRESS / REGION XIII</span></div>
             </section>}
 
             {section === "programs" && <>
@@ -753,7 +753,7 @@ export default function Experience() {
         )}
       </main>
 
-      {section !== "home" && <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Caraga" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Caraga <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
+      {section !== "home" && <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Congress" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Congress <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
@@ -782,14 +782,14 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
     <div className="auth-modal" role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
       <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
       <div className="auth-side auth-side--form">
-        <div className="auth-mobile-brand"><img src="/AEW_logo.png" alt="AEW" /><span>AEW <strong>CARAGA</strong></span></div>
+        <div className="auth-mobile-brand"><img src="/AEW_logo.png" alt="AEW" /><span>AEW <strong>CONGRESS</strong></span></div>
         <div className="auth-heading"><span className="eyebrow">{mode === "create" ? "JOIN THE COMMUNITY" : mode === "reset" ? "ACCOUNT RECOVERY" : "WELCOME BACK"}</span><h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : mode === "reset" ? <>Reset your<br />password<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : mode === "reset" ? "We’ll send a secure reset link to the email on your account." : "Sign in to access your programs and shared materials."}</p></div>
         {mode === "login" ? <form className="auth-form login-form" onSubmit={onLogin}>
           <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
           <Field label="Password" icon={<LockKeyhole size={15} />}><input type={showPassword ? "text" : "password"} name="password" autoComplete="current-password" placeholder="Enter your password" required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></Field>
           <div className="auth-form-row"><span className="secure-note"><ShieldCheck size={13} /> Protected access</span><button type="button" className="forgot-link" onClick={() => setMode("reset")}>Forgot password?</button></div>
           <button className="button button--olive button--wide" type="submit">Log in <ArrowRight size={16} /></button>
-          <p className="auth-switch">New to AEW Caraga? <button type="button" onClick={() => setMode("create")}>Create an account</button></p>
+          <p className="auth-switch">New to AEW Congress? <button type="button" onClick={() => setMode("create")}>Create an account</button></p>
         </form> : mode === "reset" ? <form className="auth-form login-form reset-form" onSubmit={(event) => { event.preventDefault(); onForgot(email); }}>
           <Field label="Email address" icon={<Mail size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
           <div className="reset-note"><LockKeyhole size={15} /><span>For your privacy, we’ll show the same confirmation whether or not an account exists.</span></div>
@@ -808,7 +808,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
           <p className="auth-switch">Already registered? <button type="button" onClick={() => setMode("login")}>Log in</button></p>
         </form>}
       </div>
-      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CARAGA<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><Leaf size={52} strokeWidth={1.2} /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
+      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CONGRESS<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><Leaf size={52} strokeWidth={1.2} /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
     </div>
   </div>;
 }

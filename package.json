@@ -2,7 +2,7 @@
   "name": "aew-caraga",
   "version": "1.0.0",
   "private": true,
-  "description": "AEW Caraga programs and materials portal",
+  "description": "AEW Congress programs and materials portal",
   "main": "index.js",
   "scripts": {
     "dev": "next dev",

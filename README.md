@@ -1,6 +1,6 @@
-# AEW Caraga
+# AEW Congress
 
-A responsive program calendar and resource library for the AEW Caraga community. The frontend is a Next.js static export for GitHub Pages. Firebase provides authentication, Firestore data, and approval email delivery; a Firebase Function exposes the protected UploadThing endpoint.
+A responsive program calendar and resource library for the AEW Congress community. The frontend is a Next.js static export for GitHub Pages. Firebase provides authentication, Firestore data, and approval email delivery; a Firebase Function exposes the protected UploadThing endpoint.
 
 ## Run locally
 
@@ -39,7 +39,7 @@ The repository includes `.github/workflows/deploy-pages.yml`. Create `aew-caraga
 ```bash
 git init
 git add .
-git commit -m "Build AEW Caraga programs site"
+git commit -m "Build AEW Congress programs site"
 git branch -M main
 git remote add origin https://github.com/aew-caraga/aew-caraga.github.io.git
 git push -u origin main

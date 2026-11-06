@@ -48,9 +48,9 @@ export const sendApprovalVerification = onDocumentUpdated("userProfiles/{uid}", 
   await getFirestore().collection("mail").add({
     to: authUser.email,
     message: {
-      subject: "Your AEW Caraga account is approved",
-      text: `Hello ${safeName}, your AEW Caraga account is approved. Verify your email address to sign in: ${verificationLink}`,
-      html: `<p>Hello ${safeName},</p><p>Your AEW Caraga account has been approved. Verify your email address to sign in.</p><p><a href="${verificationLink}">Verify my email address</a></p>`,
+      subject: "Your AEW Congress account is approved",
+      text: `Hello ${safeName}, your AEW Congress account is approved. Verify your email address to sign in: ${verificationLink}`,
+      html: `<p>Hello ${safeName},</p><p>Your AEW Congress account has been approved. Verify your email address to sign in.</p><p><a href="${verificationLink}">Verify my email address</a></p>`,
     },
     createdAt: FieldValue.serverTimestamp(),
   });

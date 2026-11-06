@@ -435,11 +435,19 @@ export default function Experience() {
     const program = programs.find((item) => item.id === String(form.get("programId")));
     if (!program) { setToast({ kind: "error", text: "Choose a published program for these mechanics." }); return; }
     const contest = String(form.get("contest")).trim().replace(/\s+/g, " ");
-    const criterion = String(form.get("criteria")).trim();
-    const description = String(form.get("description")).trim();
-    const weight = Number(form.get("weight"));
-    if (!contest || !criterion || !description || !Number.isFinite(weight) || weight < 0) {
-      setToast({ kind: "error", text: "Complete the contest details and enter a non-negative weight." });
+    let criteria: Array<{ criteria: string; description: string; weight: number }>;
+    try {
+      const rows = JSON.parse(String(form.get("criteriaRows"))) as Array<{ criteria?: unknown; description?: unknown; weight?: unknown }>;
+      criteria = rows.map((row) => ({
+        criteria: String(row.criteria ?? "").trim(),
+        description: String(row.description ?? "").trim(),
+        weight: String(row.weight ?? "").trim() ? Number(row.weight) : Number.NaN,
+      }));
+    } catch {
+      criteria = [];
+    }
+    if (!contest || !criteria.length || criteria.some((row) => !row.criteria || !row.description || !Number.isFinite(row.weight) || row.weight < 0)) {
+      setToast({ kind: "error", text: "Complete every criteria row and enter a non-negative weight for each." });
       return;
     }
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
@@ -448,11 +456,10 @@ export default function Experience() {
       const adminUser = await getVerifiedSuperadmin();
       await runTransaction(db, async (transaction) => {
         const existing = await transaction.get(mechanicsRef);
-        const newCriterion = { criteria: criterion, description, weight };
         if (existing.exists()) {
           const current = existing.data() as ContestMechanics;
           transaction.update(mechanicsRef, {
-            criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), newCriterion],
+            criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
             updatedAt: serverTimestamp(),
           });
         } else {
@@ -463,7 +470,7 @@ export default function Experience() {
             dateTo: program.dateTo,
             venue: program.venue,
             contest,
-            criteria: [newCriterion],
+            criteria,
             createdAt: serverTimestamp(),
             createdBy: adminUser.uid,
           });
@@ -713,12 +720,17 @@ function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, o
 }
 
 function ContestMechanicsModal({ programs, onClose, onCreate }: { programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label="Add contest mechanics"><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>Add contest mechanics<span>.</span></h2><p>Add one scoring criterion. Add more criteria to the same program and contest to build its full rubric.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
+  const [criteriaRows, setCriteriaRows] = useState([{ criteria: "", description: "", weight: "" }]);
+  const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
+    setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
+  };
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label="Add contest mechanics"><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>Add contest mechanics<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <Field label="Program"><select name="programId" required defaultValue=""><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
     <Field label="Contest"><input name="contest" placeholder="e.g. Agri-innovation showcase" required /></Field>
-    <Field label="Criteria"><input name="criteria" placeholder="e.g. Innovation and relevance" required /></Field>
-    <Field label="Description"><textarea name="description" rows={4} placeholder="Describe what judges should look for" required /></Field>
-    <Field label="Weight (%)"><input name="weight" type="number" min="0" step="0.01" placeholder="e.g. 25" required /></Field>
+    <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
+    <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
+    <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>
     {programs.length === 0 && <p className="form-hint">Publish a program before adding its contest mechanics.</p>}
     <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">Save mechanics <ArrowRight size={16} /></button></div>
   </form></div></div>;

@@ -47,6 +47,29 @@ export type Program = {
   flow: ProgramSession[];
 };
 
+export type ContestCriterion = { criteria: string; description: string; weight: number };
+export type ContestMechanics = {
+  id: string;
+  programId: string;
+  eventTitle: string;
+  dateFrom: string;
+  dateTo: string;
+  venue: string;
+  contest: string;
+  criteria: ContestCriterion[];
+  createdAt?: unknown;
+  createdBy: string;
+  updatedAt?: unknown;
+};
+export type ContestJoin = {
+  id: string;
+  contestId: string;
+  programId: string;
+  contest: string;
+  uid: string;
+  joinedAt?: unknown;
+};
+
 export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet";
 export type Material = {
   id: string;

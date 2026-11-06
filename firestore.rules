@@ -48,6 +48,29 @@ service cloud.firestore {
       allow create, update, delete: if isSuperadmin();
     }
 
+    match /contestMechanics/{contestId} {
+      allow read: if isSuperadmin() || isApprovedMember();
+      allow create, update, delete: if isSuperadmin();
+    }
+
+    match /contestJoins/{joinId} {
+      allow read: if isSuperadmin()
+        || (isApprovedMember() && resource.data.uid == request.auth.uid);
+      allow create: if isApprovedMember()
+        && request.resource.data.keys().hasAll([
+          'contestId', 'programId', 'contest', 'uid', 'joinedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'contestId', 'programId', 'contest', 'uid', 'joinedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && joinId == request.resource.data.contestId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId))
+        && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.programId == request.resource.data.programId
+        && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.contest == request.resource.data.contest;
+      allow update, delete: if false;
+    }
+
     // Email documents are server-created and consumed by the Firebase Trigger Email extension.
     match /mail/{mailId} {
       allow read, write: if false;

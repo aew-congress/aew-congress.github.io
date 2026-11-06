@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc,
+  addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
@@ -14,10 +14,10 @@ import {
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Plus, Search, ShieldCheck, Sparkles, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
+import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
 import { uploadFiles } from "@/lib/uploadthing";
 
-type Section = "programs" | "materials" | "approval" | "manage";
+type Section = "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
 type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Opening" | "Plenary";
 const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting", "Opening", "Plenary"];
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
@@ -75,6 +75,8 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
 
 export default function Experience() {
   const [programs, setPrograms] = useState<Program[]>([]);
+  const [contestMechanics, setContestMechanics] = useState<ContestMechanics[]>([]);
+  const [joinedContestIds, setJoinedContestIds] = useState<string[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -89,7 +91,10 @@ export default function Experience() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [programModal, setProgramModal] = useState(false);
+  const [contestMechanicsModal, setContestMechanicsModal] = useState(false);
   const [materialModal, setMaterialModal] = useState(false);
+  const [contestMechanicsLoading, setContestMechanicsLoading] = useState(true);
+  const [joiningContestId, setJoiningContestId] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
   const [cloudIssue, setCloudIssue] = useState("");
   const [loading, setLoading] = useState(true);
@@ -157,6 +162,31 @@ export default function Experience() {
     }, (error) => setCloudIssue(errorText(error)));
     return stopMaterials;
   }, [signedIn]);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setContestMechanics([]);
+      setContestMechanicsLoading(false);
+      return;
+    }
+    setContestMechanicsLoading(true);
+    const stop = onSnapshot(query(collection(db, "contestMechanics"), orderBy("createdAt", "desc")), (snapshot) => {
+      setContestMechanics(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ContestMechanics)));
+      setContestMechanicsLoading(false);
+    }, (error) => { setCloudIssue(errorText(error)); setContestMechanicsLoading(false); });
+    return stop;
+  }, [signedIn]);
+
+  useEffect(() => {
+    if (!isApprovedMember || !user) {
+      setJoinedContestIds([]);
+      return;
+    }
+    const stop = onSnapshot(query(collection(db, "contestJoins"), where("uid", "==", user.uid)), (snapshot) => {
+      setJoinedContestIds(snapshot.docs.map((entry) => (entry.data() as ContestJoin).contestId));
+    }, (error) => setCloudIssue(errorText(error)));
+    return stop;
+  }, [isApprovedMember, user?.uid]);
 
   useEffect(() => {
     if (!isAdmin) { setProfiles([]); return; }
@@ -373,6 +403,82 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
+  async function createContestMechanics(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || !isAdmin) {
+      setContestMechanicsModal(false);
+      setToast({ kind: "error", text: `Sign in with the verified superadmin account (${SUPERADMIN_EMAIL}) to add contest mechanics.` });
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    const program = programs.find((item) => item.id === String(form.get("programId")));
+    if (!program) { setToast({ kind: "error", text: "Choose a published program for these mechanics." }); return; }
+    const contest = String(form.get("contest")).trim().replace(/\s+/g, " ");
+    const criterion = String(form.get("criteria")).trim();
+    const description = String(form.get("description")).trim();
+    const weight = Number(form.get("weight"));
+    if (!contest || !criterion || !description || !Number.isFinite(weight) || weight < 0) {
+      setToast({ kind: "error", text: "Complete the contest details and enter a non-negative weight." });
+      return;
+    }
+    const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
+    const mechanicsRef = doc(db, "contestMechanics", contestId);
+    try {
+      await user.getIdToken(true);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(mechanicsRef);
+        const newCriterion = { criteria: criterion, description, weight };
+        if (existing.exists()) {
+          const current = existing.data() as ContestMechanics;
+          transaction.update(mechanicsRef, {
+            criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), newCriterion],
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          transaction.set(mechanicsRef, {
+            programId: program.id,
+            eventTitle: program.eventTitle,
+            dateFrom: program.dateFrom,
+            dateTo: program.dateTo,
+            venue: program.venue,
+            contest,
+            criteria: [newCriterion],
+            createdAt: serverTimestamp(),
+            createdBy: user.uid,
+          });
+        }
+      });
+      setContestMechanicsModal(false);
+      setToast({ kind: "success", text: `Mechanics added to ${contest}.` });
+    } catch (error) { showError(error); }
+  }
+
+  async function joinContest(contest: ContestMechanics) {
+    if (!user || !isApprovedMember) {
+      setToast({ kind: "error", text: "An approved, verified member account is required to join a contest." });
+      return;
+    }
+    if (joinedContestIds.includes(contest.id)) return;
+    setJoiningContestId(contest.id);
+    try {
+      await user.getIdToken(true);
+      const joinId = `${contest.id}_${user.uid}`;
+      await setDoc(doc(db, "contestJoins", joinId), {
+        contestId: contest.id,
+        programId: contest.programId,
+        contest: contest.contest,
+        uid: user.uid,
+        joinedAt: serverTimestamp(),
+      });
+      setJoinedContestIds((current) => current.includes(contest.id) ? current : [...current, contest.id]);
+      setToast({ kind: "success", text: `You joined ${contest.contest}.` });
+    } catch (error) {
+      if ((error as { code?: string })?.code === "permission-denied") {
+        setToast({ kind: "error", text: "Could not join. Confirm your account is approved and the latest Firestore rules are deployed." });
+      } else showError(error);
+    } finally { setJoiningContestId(""); }
+  }
+
   async function logout() {
     await signOut(auth);
     setSection("programs");
@@ -381,6 +487,8 @@ export default function Experience() {
 
   const navItems: { id: Section; label: string }[] = [
     { id: "programs", label: "Programs" },
+    ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
+    ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
     ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),
     ...(isAdmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
   ];
@@ -406,6 +514,10 @@ export default function Experience() {
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeStatus={changeStatus} onAddProgram={() => setProgramModal(true)} onAddMaterial={() => setMaterialModal(true)} />
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} onAddProgram={() => setProgramModal(true)} onAddMaterial={() => setMaterialModal(true)} onBack={() => setSection("approval")} />
+        ) : section === "contestMechanics" && isAdmin ? (
+          <ContestMechanicsPage mechanics={contestMechanics} programs={programs} loading={contestMechanicsLoading} onAdd={() => setContestMechanicsModal(true)} />
+        ) : section === "contests" && isApprovedMember ? (
+          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => setMaterialModal(true)} loading={loading} />
         ) : (
@@ -459,6 +571,7 @@ export default function Experience() {
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal onClose={() => setProgramModal(false)} onCreate={createProgram} />}
+      {contestMechanicsModal && <ContestMechanicsModal programs={programs} onClose={() => setContestMechanicsModal(false)} onCreate={createContestMechanics} />}
       {materialModal && <MaterialModal programs={programs} onClose={() => setMaterialModal(false)} onCreate={createMaterial} busy={uploadBusy} />}
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
@@ -538,6 +651,56 @@ function ManageDashboard({ programs, materials, onAddProgram, onAddMaterial, onB
   programs: Program[]; materials: Material[]; onAddProgram: () => void; onAddMaterial: () => void; onBack: () => void;
 }) {
   return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Back to approvals</button><div className="section-heading"><div><span className="eyebrow">ORGANIZATION LIBRARY</span><h2>Programs <span>& materials</span></h2></div></div><div className="manage-grid"><div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add program</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small></div><span>{program.flow.length} sessions</span></div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div><div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add material</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a></div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div></div></div>;
+}
+
+function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
+  return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
+}
+
+function ContestMechanicsPage({ mechanics, programs, loading, onAdd }: {
+  mechanics: ContestMechanics[]; programs: Program[]; loading: boolean; onAdd: () => void;
+}) {
+  return <div className="content-wrap dashboard-page contest-page">
+    <div className="section-heading contest-heading"><div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and scoring weights for published programs.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
+    <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>Each contest groups its criteria and total weight under the selected program.</p></div><span className="contest-count">{String(mechanics.length).padStart(2, "0")} CONTESTS</span></div>
+      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>TOTAL WEIGHT</th></tr></thead><tbody>
+        {mechanics.map((item) => <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><strong className="contest-weight">{contestWeightTotal(item.criteria)}%</strong></td></tr>)}
+        {!mechanics.length && <tr><td colSpan={4} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
+      </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
+    </section>
+  </div>;
+}
+
+function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, onJoin }: {
+  contests: ContestMechanics[]; joinedContestIds: string[]; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
+}) {
+  const [selectedContestId, setSelectedContestId] = useState("");
+  const selectedContest = contests.find((contest) => contest.id === selectedContestId);
+  return <div className="content-wrap dashboard-page contest-page">
+    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their mechanics, and join when you’re ready.</p></div><span className="contest-count">{String(contests.length).padStart(2, "0")} CONTESTS</span></div>
+    <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div></div>
+      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM / EVENT</th><th>CONTEST</th><th>JOIN</th><th>MECHANICS</th></tr></thead><tbody>
+        {contests.map((contest) => {
+          const joined = joinedContestIds.includes(contest.id);
+          return <tr key={contest.id}><td><strong className="table-primary">{contest.eventTitle}</strong><small className="table-muted">{dateRange(contest.dateFrom, contest.dateTo)} · {contest.venue}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} /> Joined</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide mechanics" : "View mechanics"}<ArrowUpRight size={14} /></button></td></tr>;
+        })}
+        {!contests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : "Check back when a program contest is announced."}</span></td></tr>}
+      </tbody></table></div>
+    </section>
+    {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>mechanics</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
+  </div>;
+}
+
+function ContestMechanicsModal({ programs, onClose, onCreate }: { programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label="Add contest mechanics"><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>Add contest mechanics<span>.</span></h2><p>Add one scoring criterion. Add more criteria to the same program and contest to build its full rubric.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
+    <Field label="Program"><select name="programId" required defaultValue=""><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+    <Field label="Contest"><input name="contest" placeholder="e.g. Agri-innovation showcase" required /></Field>
+    <Field label="Criteria"><input name="criteria" placeholder="e.g. Innovation and relevance" required /></Field>
+    <Field label="Description"><textarea name="description" rows={4} placeholder="Describe what judges should look for" required /></Field>
+    <Field label="Weight (%)"><input name="weight" type="number" min="0" step="0.01" placeholder="e.g. 25" required /></Field>
+    {programs.length === 0 && <p className="form-hint">Publish a program before adding its contest mechanics.</p>}
+    <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">Save mechanics <ArrowRight size={16} /></button></div>
+  </form></div></div>;
 }
 
 function MaterialsPage({ materials, programs, isAdmin, onAdd, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; onAdd: () => void; loading: boolean }) {

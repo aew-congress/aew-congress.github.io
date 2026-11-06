@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where,
+  addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
@@ -12,7 +12,7 @@ import {
   ArrowDownRight, ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
-  Menu, Plus, Search, ShieldCheck, Sparkles, Upload, UserRound, UsersRound, X,
+  Menu, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
 import { uploadFiles } from "@/lib/uploadthing";
@@ -22,6 +22,7 @@ type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Openi
 const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting", "Opening", "Plenary"];
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
+type DeleteTarget = { kind: "program" | "material" | "mechanics"; id: string; label: string };
 
 const trackColors: Record<string, string> = {
   Break: "track-break", Breakout: "track-breakout", Closing: "track-closing",
@@ -93,6 +94,11 @@ export default function Experience() {
   const [programModal, setProgramModal] = useState(false);
   const [contestMechanicsModal, setContestMechanicsModal] = useState(false);
   const [materialModal, setMaterialModal] = useState(false);
+  const [editingProgram, setEditingProgram] = useState<Program | null>(null);
+  const [editingMechanics, setEditingMechanics] = useState<ContestMechanics | null>(null);
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [contestMechanicsLoading, setContestMechanicsLoading] = useState(true);
   const [joiningContestId, setJoiningContestId] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -210,6 +216,10 @@ export default function Experience() {
   }, [toast]);
 
   function showError(error: unknown) { setToast({ kind: "error", text: errorText(error) }); }
+
+  function openProgramEditor(program: Program | null = null) { setEditingProgram(program); setProgramModal(true); }
+  function openMaterialEditor(material: Material | null = null) { setEditingMaterial(material); setMaterialModal(true); }
+  function openMechanicsEditor(mechanics: ContestMechanics | null = null) { setEditingMechanics(mechanics); setContestMechanicsModal(true); }
 
   async function getVerifiedSuperadmin() {
     const current = auth.currentUser;
@@ -359,11 +369,31 @@ export default function Experience() {
     if (payload.dateTo < payload.dateFrom) { setToast({ kind: "error", text: "The end date must be on or after the start date." }); return; }
     try {
       const adminUser = await getVerifiedSuperadmin();
-      const created = await addDoc(collection(db, "programs"), { ...payload, createdBy: adminUser.uid });
-      setSelectedProgramId(created.id);
+      if (editingProgram) {
+        const [materialSnapshot, mechanicsSnapshot] = await Promise.all([
+          getDocs(query(collection(db, "materials"), where("programId", "==", editingProgram.id))),
+          getDocs(query(collection(db, "contestMechanics"), where("programId", "==", editingProgram.id))),
+        ]);
+        const updates = [
+          { collectionName: "programs", id: editingProgram.id, data: { ...payload, updatedAt: serverTimestamp() } },
+          ...materialSnapshot.docs.map((entry) => ({ collectionName: "materials", id: entry.id, data: { programTitle: payload.eventTitle, updatedAt: serverTimestamp() } })),
+          ...mechanicsSnapshot.docs.map((entry) => ({ collectionName: "contestMechanics", id: entry.id, data: { eventTitle: payload.eventTitle, dateFrom: payload.dateFrom, dateTo: payload.dateTo, venue: payload.venue, updatedAt: serverTimestamp() } })),
+        ];
+        for (let start = 0; start < updates.length; start += 450) {
+          const batch = writeBatch(db);
+          updates.slice(start, start + 450).forEach((entry) => batch.update(doc(db, entry.collectionName, entry.id), entry.data));
+          await batch.commit();
+        }
+        setSelectedProgramId(editingProgram.id);
+        setToast({ kind: "success", text: "Program updated." });
+      } else {
+        const created = await addDoc(collection(db, "programs"), { ...payload, createdBy: adminUser.uid });
+        setSelectedProgramId(created.id);
+        setToast({ kind: "success", text: "Program published." });
+      }
       setSection("programs");
       setProgramModal(false);
-      setToast({ kind: "success", text: "Program published." });
+      setEditingProgram(null);
     } catch (error) {
       if ((error as { code?: string })?.code === "permission-denied") {
         const current = auth.currentUser;
@@ -390,8 +420,8 @@ export default function Experience() {
     const file = form.get("materialFile");
     const externalUrl = String(form.get("materialUrl")).trim();
     const category = String(form.get("category")) as MaterialCategory;
-    let url = externalUrl;
-    let name = String(form.get("materialName")).trim();
+    let url = externalUrl || editingMaterial?.url || "";
+    let name = String(form.get("materialName")).trim() || editingMaterial?.name || "";
     if (file instanceof File && file.size > 0) {
       if (!process.env.NEXT_PUBLIC_UPLOADTHING_URL) {
         setToast({ kind: "error", text: "File uploads need the Firebase UploadThing endpoint set in the Pages build environment." });
@@ -410,18 +440,23 @@ export default function Experience() {
     }
     if (!url) { setToast({ kind: "error", text: "Add a resource link or choose a file to upload." }); return; }
     try {
-      await addDoc(collection(db, "materials"), {
+      const payload = {
         programId: targetProgram.id,
         programTitle: targetProgram.eventTitle,
         category,
         name: name || url.split("/").pop() || "Program resource",
         url,
-        createdAt: serverTimestamp(),
-        createdBy: adminUser.uid,
-      });
+        updatedAt: serverTimestamp(),
+      };
+      if (editingMaterial) {
+        await updateDoc(doc(db, "materials", editingMaterial.id), payload);
+      } else {
+        await addDoc(collection(db, "materials"), { ...payload, createdAt: serverTimestamp(), createdBy: adminUser.uid });
+      }
       formElement.reset();
       setMaterialModal(false);
-      setToast({ kind: "success", text: "Material added to the resource library." });
+      setEditingMaterial(null);
+      setToast({ kind: "success", text: editingMaterial ? "Material updated." : "Material added to the resource library." });
     } catch (error) { showError(error); }
   }
 
@@ -452,33 +487,50 @@ export default function Experience() {
       return;
     }
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
-    const mechanicsRef = doc(db, "contestMechanics", contestId);
     try {
       const adminUser = await getVerifiedSuperadmin();
-      await runTransaction(db, async (transaction) => {
-        const existing = await transaction.get(mechanicsRef);
-        if (existing.exists()) {
-          const current = existing.data() as ContestMechanics;
-          transaction.update(mechanicsRef, {
-            criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          transaction.set(mechanicsRef, {
-            programId: program.id,
-            eventTitle: program.eventTitle,
-            dateFrom: program.dateFrom,
-            dateTo: program.dateTo,
-            venue: program.venue,
-            contest,
-            criteria,
-            createdAt: serverTimestamp(),
-            createdBy: adminUser.uid,
-          });
+      if (editingMechanics) {
+        const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
+        const updates = [
+          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, criteria, updatedAt: serverTimestamp() } },
+          ...joins.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id, data: { programId: program.id, contest, updatedAt: serverTimestamp() } })),
+        ];
+        for (let start = 0; start < updates.length; start += 450) {
+          const batch = writeBatch(db);
+          updates.slice(start, start + 450).forEach((entry) => batch.update(doc(db, entry.collectionName, entry.id), entry.data));
+          await batch.commit();
         }
-      });
+        setToast({ kind: "success", text: `Mechanics for ${contest} updated.` });
+      } else {
+        const programMechanics = await getDocs(query(collection(db, "contestMechanics"), where("programId", "==", program.id)));
+        const matching = programMechanics.docs.find((entry) => String(entry.data().contest ?? "").trim().toLowerCase() === contest.toLowerCase());
+        const mechanicsRef = doc(db, "contestMechanics", matching?.id ?? contestId);
+        await runTransaction(db, async (transaction) => {
+          const existing = await transaction.get(mechanicsRef);
+          if (existing.exists()) {
+            const current = existing.data() as ContestMechanics;
+            transaction.update(mechanicsRef, {
+              criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            transaction.set(mechanicsRef, {
+              programId: program.id,
+              eventTitle: program.eventTitle,
+              dateFrom: program.dateFrom,
+              dateTo: program.dateTo,
+              venue: program.venue,
+              contest,
+              criteria,
+              createdAt: serverTimestamp(),
+              createdBy: adminUser.uid,
+            });
+          }
+        });
+        setToast({ kind: "success", text: `Mechanics added to ${contest}.` });
+      }
       setContestMechanicsModal(false);
-      setToast({ kind: "success", text: `Mechanics added to ${contest}.` });
+      setEditingMechanics(null);
     } catch (error) { showError(error); }
   }
 
@@ -508,6 +560,50 @@ export default function Experience() {
     } finally { setJoiningContestId(""); }
   }
 
+  async function deleteContent() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await getVerifiedSuperadmin();
+      let refs: Array<{ collectionName: string; id: string }> = [];
+      if (deleteTarget.kind === "program") {
+        const [materialDocs, mechanicsDocs, joinDocs] = await Promise.all([
+          getDocs(query(collection(db, "materials"), where("programId", "==", deleteTarget.id))),
+          getDocs(query(collection(db, "contestMechanics"), where("programId", "==", deleteTarget.id))),
+          getDocs(query(collection(db, "contestJoins"), where("programId", "==", deleteTarget.id))),
+        ]);
+        refs = [
+          { collectionName: "programs", id: deleteTarget.id },
+          ...materialDocs.docs.map((entry) => ({ collectionName: "materials", id: entry.id })),
+          ...mechanicsDocs.docs.map((entry) => ({ collectionName: "contestMechanics", id: entry.id })),
+          ...joinDocs.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id })),
+        ];
+      } else if (deleteTarget.kind === "mechanics") {
+        const joinDocs = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", deleteTarget.id)));
+        refs = [
+          { collectionName: "contestMechanics", id: deleteTarget.id },
+          ...joinDocs.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id })),
+        ];
+      } else {
+        refs = [{ collectionName: "materials", id: deleteTarget.id }];
+      }
+      for (let start = 0; start < refs.length; start += 450) {
+        const batch = writeBatch(db);
+        refs.slice(start, start + 450).forEach((entry) => batch.delete(doc(db, entry.collectionName, entry.id)));
+        await batch.commit();
+      }
+      if (deleteTarget.kind === "program") {
+        setToast({ kind: "success", text: "Program and its related materials, contests, and joins were deleted." });
+      } else if (deleteTarget.kind === "mechanics") {
+        setToast({ kind: "success", text: "Contest mechanics and associated joins were deleted." });
+      } else {
+        setToast({ kind: "success", text: "Material removed from the library." });
+      }
+      setDeleteTarget(null);
+    } catch (error) { showError(error); }
+    finally { setDeleteBusy(false); }
+  }
+
   async function logout() {
     await signOut(auth);
     setSection("programs");
@@ -519,6 +615,7 @@ export default function Experience() {
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
     ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),
+    ...(isAdmin ? [{ id: "manage" as Section, label: "Manage content" }] : []),
     ...(isAdmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
   ];
 
@@ -540,15 +637,15 @@ export default function Experience() {
 
       <main id="top">
         {section === "approval" && isAdmin ? (
-          <ApprovalDashboard profiles={profiles} loading={loading} onChangeStatus={changeStatus} onAddProgram={() => setProgramModal(true)} onAddMaterial={() => setMaterialModal(true)} />
+          <ApprovalDashboard profiles={profiles} loading={loading} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
-          <ManageDashboard programs={programs} materials={materials} onAddProgram={() => setProgramModal(true)} onAddMaterial={() => setMaterialModal(true)} onBack={() => setSection("approval")} />
+          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} onBack={() => setSection("approval")} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} programs={programs} loading={contestMechanicsLoading} onAdd={() => setContestMechanicsModal(true)} />
+          <ContestMechanicsPage mechanics={contestMechanics} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
           <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
         ) : section === "materials" ? (
-          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => setMaterialModal(true)} loading={loading} />
+          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} loading={loading} />
         ) : (
           <>
             <section className="hero content-wrap">
@@ -570,13 +667,13 @@ export default function Experience() {
             </section>
 
             <section className="content-wrap program-section" id="program-list">
-              <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>PROGRAMS</span></span>{isAdmin && <button className="button button--soft" onClick={() => setProgramModal(true)}><Plus size={16} /> New program</button>}</div></div>
+              <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>PROGRAMS</span></span>{isAdmin && <button className="button button--soft" onClick={() => openProgramEditor()}><Plus size={16} /> New program</button>}</div></div>
               <div className="program-cards">
                 {programs.map((program, index) => <button key={program.id} className={`program-card ${selectedProgram?.id === program.id ? "program-card--selected" : ""}`} onClick={() => { setSelectedProgramId(program.id); setSelectedDay(0); }}>
                   <span className={`program-card-num program-card-num--${index % 3}`}>{String(index + 1).padStart(2, "0")}</span><div className="program-card-main"><span className="card-date"><CalendarDays size={13} />{dateRange(program.dateFrom, program.dateTo)}</span><h3>{program.eventTitle}</h3><span className="card-location"><MapPin size={13} />{program.venue}</span></div><span className="program-card-arrow"><ArrowUpRight size={18} /></span>
                 </button>)}
               </div>
-              {!programs.length && <div className="program-empty"><CalendarDays size={22} /><div><strong>{loading ? "Loading programs..." : "No programs have been published yet."}</strong><span>{loading ? "Published programs will appear here." : isAdmin ? "Add a program to share it with the community." : "Please check back later for upcoming programs."}</span></div>{isAdmin && !loading && <button className="button button--soft" onClick={() => setProgramModal(true)}><Plus size={16} /> New program</button>}</div>}
+              {!programs.length && <div className="program-empty"><CalendarDays size={22} /><div><strong>{loading ? "Loading programs..." : "No programs have been published yet."}</strong><span>{loading ? "Published programs will appear here." : isAdmin ? "Add a program to share it with the community." : "Please check back later for upcoming programs."}</span></div>{isAdmin && !loading && <button className="button button--soft" onClick={() => openProgramEditor()}><Plus size={16} /> New program</button>}</div>}
             </section>
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
@@ -588,7 +685,7 @@ export default function Experience() {
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button onClick={() => window.print()}><Download size={15} /> Print schedule</button></div>
-            </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => setProgramModal(true)}><Plus size={16} /> Create a program</button>}</section>}
+            </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
 
             {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} />}
             {cloudIssue && <div className="content-wrap cloud-notice"><CircleHelp size={16} /><span>Live data isn’t connected yet. {cloudIssue === "Missing or insufficient permissions." ? "Add the provided Firestore rules and enable sign-in in Firebase." : cloudIssue}</span></div>}
@@ -599,9 +696,10 @@ export default function Experience() {
       <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Caraga" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Caraga <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
-      {programModal && <ProgramModal onClose={() => setProgramModal(false)} onCreate={createProgram} />}
-      {contestMechanicsModal && <ContestMechanicsModal programs={programs} onClose={() => setContestMechanicsModal(false)} onCreate={createContestMechanics} />}
-      {materialModal && <MaterialModal programs={programs} onClose={() => setMaterialModal(false)} onCreate={createMaterial} busy={uploadBusy} />}
+      {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
+      {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
+      {materialModal && <MaterialModal key={editingMaterial?.id ?? "new-material"} programs={programs} initialMaterial={editingMaterial} onClose={() => { setMaterialModal(false); setEditingMaterial(null); }} onCreate={createMaterial} busy={uploadBusy} />}
+      {deleteTarget && <DeleteConfirmModal target={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteContent} />}
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
   );
@@ -676,25 +774,33 @@ function ApprovalDashboard({ profiles, loading, onChangeStatus, onAddProgram, on
   </div>;
 }
 
-function ManageDashboard({ programs, materials, onAddProgram, onAddMaterial, onBack }: {
-  programs: Program[]; materials: Material[]; onAddProgram: () => void; onAddMaterial: () => void; onBack: () => void;
+function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onAddMechanics, onEditMechanics, onDeleteMechanics, onBack }: {
+  programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
+  onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
+  onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void;
+  onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; onBack: () => void;
 }) {
-  return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Back to approvals</button><div className="section-heading"><div><span className="eyebrow">ORGANIZATION LIBRARY</span><h2>Programs <span>& materials</span></h2></div></div><div className="manage-grid"><div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add program</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small></div><span>{program.flow.length} sessions</span></div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div><div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add material</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a></div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div></div></div>;
+  const actions = (label: string, onEdit: () => void, onDelete: () => void) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
+  return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Back to approvals</button><div className="section-heading"><div><span className="eyebrow">SUPERADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
+    <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small></div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest mechanics</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest mechanics have been added yet.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material))}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
+  </div></div>;
 }
 
 function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
   return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
 }
 
-function ContestMechanicsPage({ mechanics, programs, loading, onAdd }: {
-  mechanics: ContestMechanics[]; programs: Program[]; loading: boolean; onAdd: () => void;
+function ContestMechanicsPage({ mechanics, programs, loading, onAdd, onEdit, onDelete }: {
+  mechanics: ContestMechanics[]; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
 }) {
   return <div className="content-wrap dashboard-page contest-page">
     <div className="section-heading contest-heading"><div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and scoring weights for published programs.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
     <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>Each contest groups its criteria and total weight under the selected program.</p></div><span className="contest-count">{String(mechanics.length).padStart(2, "0")} CONTESTS</span></div>
-      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>TOTAL WEIGHT</th></tr></thead><tbody>
-        {mechanics.map((item) => <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><strong className="contest-weight">{contestWeightTotal(item.criteria)}%</strong></td></tr>)}
-        {!mechanics.length && <tr><td colSpan={4} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
+      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>TOTAL WEIGHT</th><th>ACTIONS</th></tr></thead><tbody>
+        {mechanics.map((item) => <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><strong className="contest-weight">{contestWeightTotal(item.criteria)}%</strong></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>)}
+        {!mechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
       </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
     </section>
   </div>;
@@ -720,20 +826,20 @@ function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, o
   </div>;
 }
 
-function ContestMechanicsModal({ programs, onClose, onCreate }: { programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [criteriaRows, setCriteriaRows] = useState([{ criteria: "", description: "", weight: "" }]);
+function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
+  const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label="Add contest mechanics"><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>Add contest mechanics<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
-    <Field label="Program"><select name="programId" required defaultValue=""><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
-    <Field label="Contest"><input name="contest" placeholder="e.g. Agri-innovation showcase" required /></Field>
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest mechanics" : "Add contest mechanics"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest mechanics" : "Add contest mechanics"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
+    <Field label="Program"><select name="programId" required defaultValue={initialMechanics?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+    <Field label="Contest"><input name="contest" defaultValue={initialMechanics?.contest ?? ""} placeholder="e.g. Agri-innovation showcase" required /></Field>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
     <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>
     {programs.length === 0 && <p className="form-hint">Publish a program before adding its contest mechanics.</p>}
-    <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">Save mechanics <ArrowRight size={16} /></button></div>
+    <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">{initialMechanics ? "Save changes" : "Save mechanics"} <ArrowRight size={16} /></button></div>
   </form></div></div>;
 }
 
@@ -756,12 +862,22 @@ function MaterialsTeaser({ materials, onOpen }: { materials: Material[]; onOpen:
   return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find guides, presentations, and worksheets shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><span className="shelf-open"><ArrowUpRight size={15} /></span></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
-function ProgramModal({ onClose, onCreate }: { onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [sessions, setSessions] = useState<ProgramSession[]>([{ date: "", time: "", session: "", track: "", responsible: "" }]);
+function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
+  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow : [{ date: "", time: "", session: "", track: "", responsible: "" }]);
   const updateSession = (index: number, key: keyof ProgramSession, value: string) => setSessions((current) => current.map((session, i) => i === index ? { ...session, [key]: value } : session));
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label="Create a program"><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>Build a program<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" placeholder="e.g. Regional learning exchange" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" onChange={(event) => { if (!sessions[0]?.date) updateSession(0, "date", event.target.value); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" required /></Field><Field label="Short description"><input autoComplete="off" name="description" placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, time, and track.</p></div><button type="button" className="text-action" onClick={() => setSessions((current) => [...current, { date: sessions[0]?.date || "", time: "", session: "", track: "", responsible: "" }])}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <div className="session-edit-row" key={index}><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><input autoComplete="off" aria-label="Session date" type="date" value={item.date} onChange={(event) => updateSession(index, "date", event.target.value)} required /><input autoComplete="off" aria-label="Session time" placeholder="Start and end time" value={item.time} onChange={(event) => updateSession(index, "time", event.target.value)} required /><input autoComplete="off" aria-label="Session title" placeholder="Session title" value={item.session} onChange={(event) => updateSession(index, "session", event.target.value)} required /><select autoComplete="off" aria-label="Session track" required value={item.track} onChange={(event) => updateSession(index, "track", event.target.value)}><option value="" disabled>Select track</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><input autoComplete="off" aria-label="Responsible person" placeholder="Responsible" value={item.responsible} onChange={(event) => updateSession(index, "responsible", event.target.value)} /><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">Publish program <ArrowRight size={16} /></button></div></form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" defaultValue={initialProgram?.venue ?? ""} placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" defaultValue={initialProgram?.dateFrom ?? ""} onChange={(event) => { if (!sessions[0]?.date) updateSession(0, "date", event.target.value); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" defaultValue={initialProgram?.dateTo ?? ""} required /></Field><Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, time, and track.</p></div><button type="button" className="text-action" onClick={() => setSessions((current) => [...current, { date: sessions[0]?.date || "", time: "", session: "", track: "", responsible: "" }])}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <div className="session-edit-row" key={index}><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><input autoComplete="off" aria-label="Session date" type="date" value={item.date} onChange={(event) => updateSession(index, "date", event.target.value)} required /><input autoComplete="off" aria-label="Session time" placeholder="Start and end time" value={item.time} onChange={(event) => updateSession(index, "time", event.target.value)} required /><input autoComplete="off" aria-label="Session title" placeholder="Session title" value={item.session} onChange={(event) => updateSession(index, "session", event.target.value)} required /><select autoComplete="off" aria-label="Session track" required value={item.track} onChange={(event) => updateSession(index, "track", event.target.value)}><option value="" disabled>Select track</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><input autoComplete="off" aria-label="Responsible person" placeholder="Responsible" value={item.responsible} onChange={(event) => updateSession(index, "responsible", event.target.value)} /><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div></form></div></div>;
 }
 
-function MaterialModal({ programs, onClose, onCreate, busy }: { programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; busy: boolean }) {
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label="Add a material"><div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>Add a material<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}><Field label="Program"><select name="programId" required defaultValue="">{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field><Field label="Category"><select name="category" defaultValue="Guidelines">{categories.map((category) => <option key={category}>{category}</option>)}</select></Field><Field label="Material name"><input name="materialName" placeholder="e.g. Participant guide" /></Field><label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>Choose a file</strong><small>PDF, presentation, worksheet, or document · up to 16 MB</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" /></span></label><div className="or-divider"><span>OR ADD A LINK</span></div><Field label="Resource URL"><input type="url" name="materialUrl" placeholder="https://…" /></Field><p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : "Add material"}<ArrowRight size={16} /></button></div>{programs.length === 0 && <p className="form-hint">Publish a program before adding its materials.</p>}</form></div></div>;
+function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: { programs: Program[]; initialMaterial: Material | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; busy: boolean }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}><div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}><Field label="Program"><select name="programId" required defaultValue={initialMaterial?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field><Field label="Category"><select name="category" defaultValue={initialMaterial?.category ?? "Guidelines"}>{categories.map((category) => <option key={category}>{category}</option>)}</select></Field><Field label="Material name"><input name="materialName" defaultValue={initialMaterial?.name ?? ""} placeholder="e.g. Participant guide" /></Field><label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>Choose a file</strong><small>PDF, presentation, worksheet, or document · up to 16 MB</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" /></span></label><div className="or-divider"><span>OR ADD A LINK</span></div><Field label="Resource URL"><input type="url" name="materialUrl" defaultValue={initialMaterial?.url ?? ""} placeholder="https://…" /></Field><p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialMaterial ? "Save changes" : "Add material"}<ArrowRight size={16} /></button></div>{programs.length === 0 && <p className="form-hint">Publish a program before adding its materials.</p>}</form></div></div>;
+}
+
+function DeleteConfirmModal({ target, busy, onClose, onConfirm }: { target: DeleteTarget; busy: boolean; onClose: () => void; onConfirm: () => void }) {
+  const title = target.kind === "mechanics" ? "contest mechanics" : target.kind;
+  const detail = target.kind === "program"
+    ? "This also removes its contest mechanics, linked materials, and contest join records."
+    : target.kind === "mechanics"
+      ? "Associated member join records will also be removed."
+      : "This removes the material record from the resource library.";
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div className="delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-modal-title"><span className="delete-modal-icon"><Trash2 size={20} /></span><span className="eyebrow">SUPERADMIN ACTION</span><h2 id="delete-modal-title">Delete {title}?</h2><p><strong>{target.label}</strong> will be permanently deleted. {detail}</p><div className="form-modal-actions"><button type="button" className="button button--soft" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="button button--danger" disabled={busy} onClick={onConfirm}>{busy ? "Deleting…" : "Delete"}<Trash2 size={15} /></button></div></div></div>;
 }

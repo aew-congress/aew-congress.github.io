@@ -68,7 +68,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId))
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.programId == request.resource.data.programId
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.contest == request.resource.data.contest;
-      allow update, delete: if false;
+      allow update, delete: if isSuperadmin();
     }
 
     // Email documents are server-created and consumed by the Firebase Trigger Email extension.

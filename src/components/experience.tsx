@@ -488,7 +488,8 @@ export default function Experience() {
       await sendEmailVerification(credential.user);
       await signOut(auth);
       formElement.reset();
-      setAuthOpen(false);
+      setAuthMode("login");
+      setAuthOpen(true);
       setToast({ kind: "success", text: "Verification link has been sent to your email. Check your inbox and verify your account. Sign-in will be available after approval." });
     } catch (error) { showError(error); }
   }

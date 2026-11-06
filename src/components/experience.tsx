@@ -986,7 +986,7 @@ export default function Experience() {
         )}
       </main>
 
-      {section !== "home" && <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Congress" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Congress <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
+      {section !== "home" && <footer className="footer content-wrap"><span className="footer-copy">© {new Date().getFullYear()} AEW Congress <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}

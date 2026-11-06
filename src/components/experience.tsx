@@ -72,6 +72,10 @@ function philippineGreeting(date: Date) {
   return "Good evening";
 }
 
+function philippineCurrentYear() {
+  return Number(new Intl.DateTimeFormat("en-PH", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
+}
+
 const emptyResponsiblePerson = (): ResponsiblePerson => ({ name: "", designation: "", office: "" });
 
 function parseTimeValue(value: string | undefined) {
@@ -223,6 +227,11 @@ export default function Experience() {
   const isAdmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const signedIn = isAdmin || isApprovedMember;
+  const currentYear = philippineCurrentYear();
+  const currentYearProgram = useMemo(() => {
+    const thisYearPrograms = programs.filter((program) => Number(program.dateFrom?.slice(0, 4)) === currentYear);
+    return thisYearPrograms.find((program) => /aew congress/i.test(program.eventTitle)) ?? thisYearPrograms[0] ?? null;
+  }, [currentYear, programs]);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const days = useMemo(() => {
     if (!selectedProgram) return [];
@@ -953,7 +962,7 @@ export default function Experience() {
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
           <>
-            {section === "home" && <HomeLanding onExplorePrograms={() => setSection("programs")} onMemberAccess={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }} />}
+            {section === "home" && <HomeLanding program={currentYearProgram} currentYear={currentYear} loading={loading} onExplorePrograms={() => setSection("programs")} onMemberAccess={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }} />}
 
             {section === "programs" && <>
             <section className="content-wrap program-section" id="program-list">
@@ -996,7 +1005,13 @@ export default function Experience() {
   );
 }
 
-function HomeLanding({ onExplorePrograms, onMemberAccess }: { onExplorePrograms: () => void; onMemberAccess: () => void }) {
+function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMemberAccess }: { program: Program | null; currentYear: number; loading: boolean; onExplorePrograms: () => void; onMemberAccess: () => void }) {
+  const eventTitle = program?.eventTitle || `AEW Congress ${currentYear}`;
+  const eventDates = program?.dateFrom && program?.dateTo
+    ? dateRange(program.dateFrom, program.dateTo)
+    : loading ? "Loading this year’s program…" : "Dates to be announced";
+  const eventVenue = program?.venue || (loading ? "Loading venue…" : "Venue to be announced");
+  const eventTheme = program?.theme || (loading ? "Loading this year’s theme…" : "Theme to be announced");
   const objectives = [
     { icon: BadgeCheck, title: "Honoring & Acknowledging Frontliners", description: "Recognize the people connecting institutions, programs, and local communities." },
     { icon: Sparkles, title: "Capacity Building & Knowledge Updates", description: "Bring current research, practices, and useful tools into extension work." },
@@ -1008,7 +1023,7 @@ function HomeLanding({ onExplorePrograms, onMemberAccess }: { onExplorePrograms:
     <section className="landing-hero">
       <div className="content-wrap landing-hero-inner">
         <div className="landing-hero-copy">
-          <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · AEW CONGRESS 2026</span>
+          <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · {eventTitle.toUpperCase()}</span>
           <h1>Recognizing the people who help agriculture <span>thrive.</span></h1>
           <p>The Agricultural Extension Worker (AEW) Congress recognizes, empowers, and supports agricultural and fishery extension workers—the vital frontliners connecting research institutions and government agencies with local farming and fishing communities.</p>
           <div className="landing-hero-actions">
@@ -1016,8 +1031,8 @@ function HomeLanding({ onExplorePrograms, onMemberAccess }: { onExplorePrograms:
             <button className="text-action" onClick={onMemberAccess}>Member access <ArrowRight size={16} /></button>
           </div>
           <div className="landing-event-facts">
-            <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>November 11–13, 2026</strong></span></div>
-            <div className="landing-event-fact"><span className="landing-fact-icon"><MapPin size={18} /></span><span><small>VENUE</small><strong>Balanghai Hotel and Convention Center<br />Butuan City 8600</strong></span></div>
+            <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>{eventDates}</strong></span></div>
+            <div className="landing-event-fact"><span className="landing-fact-icon"><MapPin size={18} /></span><span><small>VENUE</small><strong>{eventVenue}</strong></span></div>
           </div>
         </div>
         <figure className="landing-hero-photo">
@@ -1025,7 +1040,7 @@ function HomeLanding({ onExplorePrograms, onMemberAccess }: { onExplorePrograms:
           <span className="landing-photo-badge"><strong>AEW CONGRESS</strong><small>CARAGA REGION XIII</small></span>
           <figcaption><span>RECOGNIZE · EMPOWER · SUPPORT</span><strong>Frontliners bridging knowledge and community</strong></figcaption>
         </figure>
-        <div className="landing-theme-banner"><span className="landing-theme-icon"><Sparkles size={18} /></span><span className="landing-theme-copy"><small>THIS YEAR’S THEME</small><strong>Advancing Agricultural Extension Towards Sustainable Agri-Food Systems and Inclusive Growth.</strong></span><span className="landing-theme-year">2026</span></div>
+        <div className="landing-theme-banner"><span className="landing-theme-icon"><Sparkles size={18} /></span><span className="landing-theme-copy"><small>CURRENT YEAR · {currentYear} THEME</small><strong>{eventTheme}</strong></span><span className="landing-theme-year">{currentYear}</span></div>
       </div>
     </section>
 

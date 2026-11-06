@@ -519,11 +519,11 @@ export default function Experience() {
   async function createMaterial(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     let adminUser: User;
     try { adminUser = await getVerifiedSuperadmin(); }
     catch (error) { showError(error); return; }
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
     const targetProgram = programs.find((program) => program.id === String(form.get("programId")));
     if (!targetProgram) { setToast({ kind: "error", text: "Choose a published program for this material." }); return; }
     const file = form.get("materialFile");

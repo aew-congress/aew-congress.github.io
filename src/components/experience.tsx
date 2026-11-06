@@ -308,10 +308,11 @@ export default function Experience() {
         createdAt: serverTimestamp(),
       };
       await (await import("firebase/firestore")).setDoc(doc(db, "userProfiles", credential.user.uid), profile);
+      await sendEmailVerification(credential.user);
       await signOut(auth);
       formElement.reset();
       setAuthOpen(false);
-      setToast({ kind: "success", text: "Registration received. You can sign in once your account has been approved." });
+      setToast({ kind: "success", text: "Verification link has been sent to your email. Check your inbox and verify your account. Sign-in will be available after approval." });
     } catch (error) { showError(error); }
   }
 

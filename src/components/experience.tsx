@@ -467,7 +467,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
   const labels = ["Very weak", "Weak", "So-so", "Good", "Great!"];
   const today = new Date().toISOString().slice(0, 10);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className={`auth-modal ${mode === "create" ? "auth-modal--flipped" : mode === "reset" ? "auth-modal--reset" : ""}`} role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
+    <div className="auth-modal" role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
       <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
       <div className="auth-side auth-side--form">
         <div className="auth-mobile-brand"><img src="/AEW_logo.png" alt="AEW" /><span>AEW <strong>CARAGA</strong></span></div>

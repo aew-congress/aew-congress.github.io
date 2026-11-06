@@ -87,6 +87,14 @@ export type ContestJoin = {
   contest: string;
   uid: string;
   joinedAt?: unknown;
+  status?: "Joined" | "Qualified Contestant";
+};
+
+export type AttendanceConfirmation = {
+  id: string;
+  programId: string;
+  uid: string;
+  confirmedAt?: unknown;
 };
 
 export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet";

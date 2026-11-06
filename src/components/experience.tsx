@@ -14,10 +14,10 @@ import {
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
-type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
+type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage" | "confirmedAttendees";
 type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Opening" | "Plenary";
 const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting", "Opening", "Plenary"];
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
@@ -204,7 +204,11 @@ export default function Experience() {
   const [contestJoins, setContestJoins] = useState<ContestJoin[]>([]);
   const [contestJoinsLoading, setContestJoinsLoading] = useState(false);
   const [joinedContestIds, setJoinedContestIds] = useState<string[]>([]);
+  const [joinedContestStatuses, setJoinedContestStatuses] = useState<Record<string, string>>({});
+  const [confirmingJoinId, setConfirmingJoinId] = useState("");
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [attendanceConfirmations, setAttendanceConfirmations] = useState<AttendanceConfirmation[]>([]);
+  const [attendanceConfirmationsLoading, setAttendanceConfirmationsLoading] = useState(false);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -216,6 +220,9 @@ export default function Experience() {
   const [search, setSearch] = useState("");
   const [hoveredTimeGroup, setHoveredTimeGroup] = useState<number | null>(null);
   const [expandedSessionPeriods, setExpandedSessionPeriods] = useState<Set<string>>(() => new Set());
+  const [attendanceStatus, setAttendanceStatus] = useState<{ id: string; confirmed: boolean; loading: boolean }>({ id: "", confirmed: false, loading: false });
+  const [attendanceConfirmOpen, setAttendanceConfirmOpen] = useState(false);
+  const [attendanceSubmitting, setAttendanceSubmitting] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -237,6 +244,7 @@ export default function Experience() {
 
   const isAdmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
+  const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
   const signedIn = isAdmin || isApprovedMember;
   const currentYear = philippineCurrentYear();
   const currentYearProgram = useMemo(() => {
@@ -248,6 +256,24 @@ export default function Experience() {
     document.title = `AEW Congress ${programYear || currentYear}`;
   }, [currentYear, currentYearProgram]);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
+  const attendanceConfirmationId = user && selectedProgram ? `${selectedProgram.id}_${user.uid}` : "";
+  const attendanceChecking = isRegularMember && (!attendanceConfirmationId || attendanceStatus.id !== attendanceConfirmationId || attendanceStatus.loading);
+  const attendanceConfirmed = isRegularMember && attendanceStatus.id === attendanceConfirmationId && attendanceStatus.confirmed;
+
+  useEffect(() => {
+    if (!isRegularMember || !attendanceConfirmationId) {
+      setAttendanceStatus({ id: attendanceConfirmationId, confirmed: false, loading: false });
+      return;
+    }
+    setAttendanceStatus({ id: attendanceConfirmationId, confirmed: false, loading: true });
+    return onSnapshot(doc(db, "attendanceConfirmations", attendanceConfirmationId), (snapshot) => {
+      setAttendanceStatus({ id: attendanceConfirmationId, confirmed: snapshot.exists(), loading: false });
+    }, (error) => {
+      setAttendanceStatus({ id: attendanceConfirmationId, confirmed: false, loading: false });
+      setToast({ kind: "error", text: errorText(error) });
+    });
+  }, [isRegularMember, attendanceConfirmationId]);
+
   const days = useMemo(() => {
     if (!selectedProgram) return [];
     const first = new Date(`${selectedProgram.dateFrom}T12:00:00`);
@@ -421,10 +447,13 @@ export default function Experience() {
   useEffect(() => {
     if (!isApprovedMember || !user) {
       setJoinedContestIds([]);
+      setJoinedContestStatuses({});
       return;
     }
     const stop = onSnapshot(query(collection(db, "contestJoins"), where("uid", "==", user.uid)), (snapshot) => {
-      setJoinedContestIds(snapshot.docs.map((entry) => (entry.data() as ContestJoin).contestId));
+      const joins = snapshot.docs.map((entry) => entry.data() as ContestJoin);
+      setJoinedContestIds(joins.map((join) => join.contestId));
+      setJoinedContestStatuses(Object.fromEntries(joins.map((join) => [join.contestId, join.status ?? "Joined"])));
     }, (error) => setCloudIssue(errorText(error)));
     return stop;
   }, [isApprovedMember, user?.uid]);
@@ -454,6 +483,20 @@ export default function Experience() {
   }, [isAdmin]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setAttendanceConfirmations([]);
+      setAttendanceConfirmationsLoading(false);
+      return;
+    }
+    setAttendanceConfirmationsLoading(true);
+    const stopAttendance = onSnapshot(collection(db, "attendanceConfirmations"), (snapshot) => {
+      setAttendanceConfirmations(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as AttendanceConfirmation)));
+      setAttendanceConfirmationsLoading(false);
+    }, (error) => { setCloudIssue(errorText(error)); setAttendanceConfirmationsLoading(false); });
+    return stopAttendance;
+  }, [isAdmin]);
+
+  useEffect(() => {
     if (programs.length && (!selectedProgramId || !programs.some((program) => program.id === selectedProgramId))) {
       setSelectedProgramId(programs[0].id);
       setSelectedDay(0);
@@ -467,6 +510,26 @@ export default function Experience() {
   }, [toast]);
 
   function showError(error: unknown) { setToast({ kind: "error", text: errorText(error) }); }
+
+  async function submitAttendanceConfirmation() {
+    if (!user || !selectedProgram || !isRegularMember || attendanceChecking || attendanceConfirmed || attendanceSubmitting) return;
+    setAttendanceSubmitting(true);
+    try {
+      await setDoc(doc(db, "attendanceConfirmations", attendanceConfirmationId), {
+        programId: selectedProgram.id,
+        uid: user.uid,
+        confirmedAt: serverTimestamp(),
+      });
+      setAttendanceStatus({ id: attendanceConfirmationId, confirmed: true, loading: false });
+      setAttendanceConfirmOpen(false);
+      setToast({ kind: "success", text: "Your attendance has been confirmed." });
+    } catch (error) {
+      setAttendanceConfirmOpen(false);
+      showError(error);
+    } finally {
+      setAttendanceSubmitting(false);
+    }
+  }
 
   async function downloadMaterial(material: Material) {
     if (!isUploadThingFile(material.url)) {
@@ -894,6 +957,21 @@ export default function Experience() {
     } finally { setJoiningContestId(""); }
   }
 
+  async function confirmContestant(join: ContestJoin) {
+    if (!isAdmin || join.status === "Qualified Contestant") return;
+    setConfirmingJoinId(join.id);
+    try {
+      await getVerifiedSuperadmin();
+      await updateDoc(doc(db, "contestJoins", join.id), { status: "Qualified Contestant" });
+      setContestJoins((current) => current.map((item) => item.id === join.id ? { ...item, status: "Qualified Contestant" } : item));
+      setToast({ kind: "success", text: `Contestant confirmed as qualified for ${join.contest}.` });
+    } catch (error) {
+      showError(error);
+    } finally {
+      setConfirmingJoinId("");
+    }
+  }
+
   async function deleteContent() {
     if (!deleteTarget) return;
     setDeleteBusy(true);
@@ -942,6 +1020,7 @@ export default function Experience() {
     await signOut(auth);
     setSection("home");
     setMobileMenuOpen(false);
+    setAttendanceConfirmOpen(false);
     setToast({ kind: "success", text: "You have signed out." });
   }
 
@@ -951,6 +1030,7 @@ export default function Experience() {
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
     ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage content" }] : []),
+    ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
     ...(isAdmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
   ];
 
@@ -975,10 +1055,12 @@ export default function Experience() {
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} onBack={() => setSection("approval")} />
+        ) : section === "confirmedAttendees" && isAdmin ? (
+          <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
+          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
-          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
+          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
@@ -997,7 +1079,7 @@ export default function Experience() {
             </section>
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
-              <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label><label className="filter-select"><Filter size={14} /><select value={trackFilter} onChange={(e) => setTrackFilter(e.target.value)} aria-label="Filter by track"><option>All tracks</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><ChevronDown size={13} /></label></div></div>
+              <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label><label className="filter-select"><Filter size={14} /><select value={trackFilter} onChange={(e) => setTrackFilter(e.target.value)} aria-label="Filter by track"><option>All tracks</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><ChevronDown size={13} /></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
@@ -1028,6 +1110,7 @@ export default function Experience() {
 
       {section !== "home" && <footer className="footer content-wrap"><span className="footer-copy">© {new Date().getFullYear()} AEW Congress <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
 
+      {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
@@ -1087,6 +1170,26 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
       <div className="landing-gallery-grid">
         <figure className="landing-gallery-card"><img src="/p2.jpg" alt="A speaker addresses agricultural extension workers at a congress" /><figcaption><span>KNOWLEDGE SHARED</span><strong>Learning from one another</strong></figcaption></figure>
         <figure className="landing-gallery-card"><img src="/p3.jpg" alt="Agricultural extension workers gathered for a regional congress" /><figcaption><span>REGIONAL CONNECTIONS</span><strong>Stronger together</strong></figcaption></figure>
+      </div>
+    </section>
+  </div>;
+}
+
+function AttendanceConfirmationModal({ programTitle, busy, onCancel, onConfirm }: {
+  programTitle: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return <div className="modal-backdrop attendance-confirm-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }} onKeyDown={(event) => { if (event.key === "Escape" && !busy) onCancel(); }}>
+    <section className="attendance-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="attendance-confirm-title">
+      <div className="attendance-confirm-icon"><CalendarDays size={21} /></div>
+      <span className="eyebrow">ATTENDANCE CONFIRMATION</span>
+      <h2 id="attendance-confirm-title">Are you sure you want to attend the program?</h2>
+      <p>{programTitle}</p>
+      <div className="attendance-confirm-actions">
+        <button className="button button--soft" type="button" autoFocus disabled={busy} onClick={onCancel}>No</button>
+        <button className="button button--olive" type="button" disabled={busy} onClick={onConfirm}>{busy ? "Saving…" : "Yes"}</button>
       </div>
     </section>
   </div>;
@@ -1166,6 +1269,43 @@ function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, on
   </div>;
 }
 
+function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, confirmations, profiles, loading }: {
+  programs: Program[];
+  selectedProgramId: string;
+  onSelectProgram: (id: string) => void;
+  confirmations: AttendanceConfirmation[];
+  profiles: UserProfile[];
+  loading: boolean;
+}) {
+  const profilesById = new Map(profiles.map((profile) => [profile.uid, profile]));
+  const attendees = confirmations
+    .filter((confirmation) => confirmation.programId === selectedProgramId)
+    .flatMap((confirmation) => {
+      const profile = profilesById.get(confirmation.uid);
+      return profile && profileRole(profile) === "regular" ? [profile] : [];
+    })
+    .sort((a, b) => fullName(a).localeCompare(fullName(b)));
+  const selectedProgram = programs.find((program) => program.id === selectedProgramId);
+
+  return <div className="content-wrap dashboard-page confirmed-attendees-page">
+    <div className="section-heading">
+      <div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Confirmed <span>Attendees</span></h2><p>Regular users who confirmed they plan to attend.</p></div>
+      <label className="confirmed-attendees-program"><span>Program</span><select value={selectedProgramId} onChange={(event) => onSelectProgram(event.target.value)} disabled={!programs.length}>
+        {!programs.length && <option value="">No programs available</option>}
+        {programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}
+      </select></label>
+    </div>
+    <section className="approval-panel">
+      <div className="panel-heading"><div><span className="eyebrow">ATTENDANCE</span><h2>{selectedProgram?.eventTitle ?? "Program attendees"}</h2><p>{selectedProgram ? "Confirmed attendance for this program." : "Publish a program to collect attendance confirmations."}</p></div><span className="confirmed-attendees-count">{attendees.length} {attendees.length === 1 ? "attendee" : "attendees"}</span></div>
+      <div className="approval-table-wrap"><table className="approval-table confirmed-attendees-table"><thead><tr><th>NAME</th><th>POSITION</th><th>DESIGNATION</th><th>OFFICE</th><th>EMAIL</th><th>CONTACT NUMBER</th></tr></thead><tbody>
+        {attendees.map((profile) => <tr key={profile.uid}><td><strong className="table-primary">{fullName(profile)}</strong></td><td>{profile.position || "—"}</td><td>{profile.designation || "—"}</td><td>{profile.office || "—"}</td><td>{profile.email}</td><td>{profile.contactNo || "—"}</td></tr>)}
+        {!attendees.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading confirmations…" : selectedProgram ? "No confirmed attendees yet" : "No program selected"}</strong><span>{loading ? "Confirmed attendees will appear here." : "This list updates when regular users confirm attendance."}</span></td></tr>}
+      </tbody></table></div>
+      <div className="table-footnote"><span><LockKeyhole size={13} /> Attendee details are visible only to superadmins.</span><span>{attendees.length} confirmed</span></div>
+    </section>
+  </div>;
+}
+
 function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onAddMechanics, onEditMechanics, onDeleteMechanics, onBack }: {
   programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
   onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
@@ -1184,8 +1324,8 @@ function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
   return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
 }
 
-function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, programs, loading, onAdd, onEdit, onDelete }: {
-  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
+function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, onAdd, onEdit, onDelete }: {
+  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
 }) {
   const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
   const profilesByUid = new Map(profiles.map((profile) => [profile.uid, profile]));
@@ -1209,15 +1349,16 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
         </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can view contestant details and edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
       </section>
     </div>
-    {viewingContestants && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewingContestants(null); }}><section className="form-modal contestants-modal" role="dialog" aria-modal="true" aria-labelledby="contestants-modal-title"><div className="form-modal-head"><div><span className="eyebrow">CONTESTANTS</span><h2 id="contestants-modal-title">{viewingContestants.contest}<span>.</span></h2><p>{viewingContestants.eventTitle} · {dateRange(viewingContestants.dateFrom, viewingContestants.dateTo)}</p></div><button className="modal-close modal-close--inline" onClick={() => setViewingContestants(null)} aria-label="Close contestants list"><X size={19} /></button></div><div className="contestants-table-wrap"><table className="approval-table contestants-table"><thead><tr><th>NAME</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th></tr></thead><tbody>{contestantsLoading ? <tr><td colSpan={4} className="empty-table">Loading contestants…</td></tr> : sortedJoins.length ? sortedJoins.map((join) => {
+    {viewingContestants && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !confirmingJoinId) setViewingContestants(null); }}><section className="form-modal contestants-modal" role="dialog" aria-modal="true" aria-labelledby="contestants-modal-title"><div className="form-modal-head"><div><span className="eyebrow">CONTESTANTS</span><h2 id="contestants-modal-title">{viewingContestants.contest}<span>.</span></h2><p>{viewingContestants.eventTitle} · {dateRange(viewingContestants.dateFrom, viewingContestants.dateTo)}</p></div><button className="modal-close modal-close--inline" onClick={() => !confirmingJoinId && setViewingContestants(null)} aria-label="Close contestants list"><X size={19} /></button></div><div className="contestants-table-wrap"><table className="approval-table contestants-table"><thead><tr><th>NAME</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>STATUS / CONFIRM</th></tr></thead><tbody>{contestantsLoading ? <tr><td colSpan={5} className="empty-table">Loading contestants…</td></tr> : sortedJoins.length ? sortedJoins.map((join) => {
       const profile = profilesByUid.get(join.uid);
-      return <tr key={join.id}><td><strong className="table-primary">{profile ? fullName(profile) || "Member" : "Member profile unavailable"}</strong></td><td>{profile?.designation || "—"}</td><td>{profile?.office || "—"}</td><td>{profile?.contactNo || "—"}</td></tr>;
-    }) : <tr><td colSpan={4} className="empty-table"><UsersRound size={20} /><strong>No contestants yet</strong><span>Members who join this contest will appear here.</span></td></tr>}</tbody></table></div><div className="form-modal-actions"><button className="button button--soft" onClick={() => setViewingContestants(null)}>Close</button></div></section></div>}
+      const qualified = join.status === "Qualified Contestant";
+      return <tr key={join.id}><td><strong className="table-primary">{profile ? fullName(profile) || "Member" : "Member profile unavailable"}</strong></td><td>{profile?.designation || "—"}</td><td>{profile?.office || "—"}</td><td>{profile?.contactNo || "—"}</td><td><div className="contestant-confirm-cell">{qualified ? <span className="qualified-contestant">Qualified Contestant</span> : <><span className="table-muted">Joined</span><button className="button button--soft contestant-confirm-button" disabled={Boolean(confirmingJoinId)} onClick={() => onConfirmContestant(join)}>{confirmingJoinId === join.id ? "Confirming…" : "Confirm"}</button></>}</div></td></tr>;
+    }) : <tr><td colSpan={5} className="empty-table"><UsersRound size={20} /><strong>No contestants yet</strong><span>Members who join this contest will appear here.</span></td></tr>}</tbody></table></div><div className="form-modal-actions"><button className="button button--soft" disabled={Boolean(confirmingJoinId)} onClick={() => setViewingContestants(null)}>Close</button></div></section></div>}
   </>;
 }
 
-function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, onJoin }: {
-  contests: ContestMechanics[]; joinedContestIds: string[]; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
+function ContestsPage({ contests, joinedContestIds, joinedContestStatuses, joiningContestId, loading, onJoin }: {
+  contests: ContestMechanics[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
 }) {
   const [selectedContestId, setSelectedContestId] = useState("");
   const selectedContest = contests.find((contest) => contest.id === selectedContestId);
@@ -1227,7 +1368,8 @@ function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, o
       <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM / EVENT</th><th>CONTEST</th><th>JOIN</th><th>MECHANICS</th></tr></thead><tbody>
         {contests.map((contest) => {
           const joined = joinedContestIds.includes(contest.id);
-          return <tr key={contest.id}><td><strong className="table-primary">{contest.eventTitle}</strong><small className="table-muted">{dateRange(contest.dateFrom, contest.dateTo)} · {contest.venue}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} /> Joined</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide mechanics" : "View mechanics"}<ArrowUpRight size={14} /></button></td></tr>;
+          const qualified = joinedContestStatuses[contest.id] === "Qualified Contestant";
+          return <tr key={contest.id}><td><strong className="table-primary">{contest.eventTitle}</strong><small className="table-muted">{dateRange(contest.dateFrom, contest.dateTo)} · {contest.venue}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide mechanics" : "View mechanics"}<ArrowUpRight size={14} /></button></td></tr>;
         })}
         {!contests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : "Check back when a program contest is announced."}</span></td></tr>}
       </tbody></table></div>

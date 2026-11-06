@@ -27,6 +27,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.emailVerified == true;
     }
 
+    function isRegularMember() {
+      return isApprovedMember()
+        && !isSuperadmin()
+        && (!('role' in get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data)
+          || get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'regular');
+    }
+
     function canConfirmEmailVerification(uid) {
       return signedIn()
         && request.auth.uid == uid
@@ -97,6 +104,22 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.programId == request.resource.data.programId
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.contest == request.resource.data.contest;
       allow update, delete: if isSuperadmin();
+    }
+
+    match /attendanceConfirmations/{confirmationId} {
+      allow get: if isSuperadmin()
+        || (isRegularMember()
+          && (resource == null || resource.data.uid == request.auth.uid));
+      allow list: if isSuperadmin();
+      allow create: if isRegularMember()
+        && request.resource.data.keys().hasAll(['programId', 'uid', 'confirmedAt'])
+        && request.resource.data.keys().hasOnly(['programId', 'uid', 'confirmedAt'])
+        && request.resource.data.programId is string
+        && request.resource.data.uid == request.auth.uid
+        && confirmationId == request.resource.data.programId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/programs/$(request.resource.data.programId))
+        && request.resource.data.confirmedAt == request.time;
+      allow update, delete: if false;
     }
 
     // Email documents are server-created and consumed by the Firebase Trigger Email extension.

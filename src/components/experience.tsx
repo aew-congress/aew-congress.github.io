@@ -719,6 +719,7 @@ export default function Experience() {
   }
 
   const navItems: { id: Section; label: string }[] = [
+    ...(isApprovedMember ? [{ id: "programs" as Section, label: "Programs" }] : []),
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
     ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),

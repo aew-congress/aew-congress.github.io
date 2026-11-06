@@ -1026,7 +1026,7 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
         <div className="landing-hero-copy">
           <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · {eventTitle.toUpperCase()}</span>
           <h1>Recognizing the people who help agriculture <span>thrive.</span></h1>
-          <p>The Agricultural Extension Worker (AEW) Congress recognizes, empowers, and supports agricultural and fishery extension workers—the vital frontliners connecting research institutions and government agencies with local farming and fishing communities.</p>
+          <p><strong>Agricultural Extension Worker (AEW) Congress</strong> recognizes, empowers, and supports agricultural and fishery extension workers—the vital frontliners connecting research institutions and government agencies with local farming and fishing communities.</p>
           <div className="landing-hero-actions">
             <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
             <button className="text-action" onClick={onMemberAccess}>Member access <ArrowRight size={16} /></button>

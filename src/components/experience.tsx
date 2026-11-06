@@ -12,7 +12,7 @@ import {
   ArrowDownRight, ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
+  Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
@@ -868,7 +868,7 @@ export default function Experience() {
                 {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{sessionTimeLabel(item)}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
-              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print or save the schedule" title="Open the print dialog to print or save as PDF" onClick={() => window.print()}><Download size={15} /> Download schedule</button></div>
+              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>
             </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
 
             {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} onDownload={downloadMaterial} />}

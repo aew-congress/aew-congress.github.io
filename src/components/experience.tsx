@@ -723,7 +723,6 @@ export default function Experience() {
   }
 
   const navItems: { id: Section; label: string }[] = [
-    { id: "programs", label: "Programs" },
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
     ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),
@@ -739,7 +738,7 @@ export default function Experience() {
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>PROGRAMS & MATERIALS</small></span>
         </a>
         <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={section === item.id || (section === "home" && item.id === "programs") ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
+          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
         </nav>
         <div className="topbar-actions">
           {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isAdmin ? "Superadmin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}

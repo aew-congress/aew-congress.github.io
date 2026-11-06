@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
@@ -117,6 +117,16 @@ function sessionTimeLabel(item: ProgramSession) {
   return item.time?.trim() || "—";
 }
 
+function sessionPeriodLabel(item: ProgramSession) {
+  const startTime = sessionTimeRange(item).startTime;
+  if (!startTime) return "";
+  const [hour, minute] = startTime.split(":").map(Number);
+  const minutes = hour * 60 + minute;
+  if (minutes < 12 * 60) return "MORNING SESSION";
+  if (minutes <= 17 * 60) return "AFTERNOON SESSION";
+  return "EVENING SESSION";
+}
+
 function responsiblePeople(value: ProgramSession["responsible"]): ResponsiblePerson[] {
   if (Array.isArray(value)) return value.map((person) => ({
     name: String(person?.name ?? ""),
@@ -205,6 +215,7 @@ export default function Experience() {
   const [trackFilter, setTrackFilter] = useState<string>("All tracks");
   const [search, setSearch] = useState("");
   const [hoveredTimeGroup, setHoveredTimeGroup] = useState<number | null>(null);
+  const [expandedSessionPeriods, setExpandedSessionPeriods] = useState<Set<string>>(() => new Set());
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -264,11 +275,15 @@ export default function Experience() {
   }, [days, selectedDay, selectedProgram, search, trackFilter]);
 
   const scheduleRows = useMemo(() => {
-    const rows: { item: ProgramSession; timeRowSpan: number; timeGroup: number }[] = [];
+    const rows: { item: ProgramSession; timeRowSpan: number; timeGroup: number; period: string; periodLabel: string }[] = [];
     let timeGroup = 0;
+    let previousPeriod = "";
     for (let index = 0; index < filteredSessions.length;) {
       const item = filteredSessions[index];
       const time = sessionTimeRange(item);
+      const period = sessionPeriodLabel(item);
+      const periodLabel = period && period !== previousPeriod ? period : "";
+      if (period) previousPeriod = period;
       let groupEnd = index + 1;
       if (time.startTime && time.endTime) {
         while (groupEnd < filteredSessions.length) {
@@ -278,9 +293,9 @@ export default function Experience() {
           groupEnd += 1;
         }
       }
-      rows.push({ item, timeRowSpan: groupEnd - index, timeGroup });
+      rows.push({ item, timeRowSpan: groupEnd - index, timeGroup, period, periodLabel });
       for (let groupedIndex = index + 1; groupedIndex < groupEnd; groupedIndex += 1) {
-        rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0, timeGroup });
+        rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0, timeGroup, period, periodLabel: "" });
       }
       index = groupEnd;
       timeGroup += 1;
@@ -926,6 +941,7 @@ export default function Experience() {
   async function logout() {
     await signOut(auth);
     setSection("home");
+    setMobileMenuOpen(false);
     setToast({ kind: "success", text: "You have signed out." });
   }
 
@@ -942,15 +958,15 @@ export default function Experience() {
     <div className="site-shell">
       <header className="topbar">
         <a href="#top" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
-          <span className="brand-mark"><img src="/AEW_logo.png" alt="" /></span>
+          <span className="brand-mark"><img src="/AEW_logo_1.png" alt="" /></span>
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
         </a>
-        <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
+        {signedIn && <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
           {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}
-        </nav>
+        </nav>}
         <div className="topbar-actions">
           {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isAdmin ? "Superadmin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
-          <button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>
+          {signedIn && <button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>}
         </div>
       </header>
 
@@ -985,7 +1001,19 @@ export default function Experience() {
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
-                {scheduleRows.map(({ item, timeRowSpan, timeGroup }, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
+                {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
+                  const periodKey = `${selectedProgram.id}:${item.date}:${period}`;
+                  const periodExpanded = !period || expandedSessionPeriods.has(periodKey);
+                  return <Fragment key={`${item.date}-${item.startTime ?? item.time}-${item.session}-${index}`}>
+                    {periodLabel && <tr className="session-period-row"><th colSpan={4} scope="rowgroup"><button type="button" aria-expanded={periodExpanded} onClick={() => setExpandedSessionPeriods((current) => {
+                      const next = new Set(current);
+                      if (next.has(periodKey)) next.delete(periodKey);
+                      else next.add(periodKey);
+                      return next;
+                    })}><ChevronRight size={14} />{periodLabel}</button></th></tr>}
+                    {periodExpanded && <tr className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>}
+                  </Fragment>;
+                })}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>
@@ -1079,7 +1107,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
     <div className="auth-modal" role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
       <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
       <div className="auth-side auth-side--form">
-        <div className="auth-mobile-brand"><img src="/AEW_logo.png" alt="AEW" /><span>AEW <strong>CONGRESS</strong></span></div>
+        <div className="auth-mobile-brand"><img src="/AEW_logo_1.png" alt="AEW" /><span>AEW <strong>CONGRESS</strong></span></div>
         <div className="auth-heading"><span className="eyebrow">{mode === "create" ? "JOIN THE COMMUNITY" : mode === "reset" ? "ACCOUNT RECOVERY" : "WELCOME BACK"}</span><h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : mode === "reset" ? <>Reset your<br />password<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : mode === "reset" ? "We’ll send a secure reset link to the email on your account." : "Sign in to access your programs and shared materials."}</p></div>
         {mode === "login" ? <form className="auth-form login-form" onSubmit={onLogin}>
           <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>

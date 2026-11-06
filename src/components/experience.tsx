@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
@@ -202,6 +202,7 @@ export default function Experience() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [cloudIssue, setCloudIssue] = useState("");
   const [loading, setLoading] = useState(true);
+  const authActionInProgress = useRef(false);
 
   const isAdmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
@@ -235,8 +236,15 @@ export default function Experience() {
       setLoading(false);
     }, (error) => { setCloudIssue(errorText(error)); setLoading(false); });
     const stopAuth = onAuthStateChanged(auth, async (current) => {
+      if (!current) { setUser(null); setActiveProfile(null); return; }
+      // Login and registration handle verification and approval in sequence. Avoid
+      // racing those flows with the background session guard.
+      if (authActionInProgress.current) { setUser(current); return; }
+      try {
+        await current.reload();
+        await current.getIdToken(true);
+      } catch { /* A later sign-in will retry the verification refresh. */ }
       setUser(current);
-      if (!current) { setActiveProfile(null); return; }
       if (current.email?.toLowerCase() === SUPERADMIN_EMAIL) {
         if (current.emailVerified) setActiveProfile(null);
         else {
@@ -258,12 +266,28 @@ export default function Experience() {
           setActiveProfile(profile);
           return;
         }
-        if (profile.status !== "Approved" || !current.emailVerified) {
+        if (!current.emailVerified) {
           await signOut(auth);
           setActiveProfile(profile);
           return;
         }
-        setActiveProfile(profile);
+        const verifiedProfile = {
+          ...profile,
+          emailVerified: true,
+          status: profile.status === "Unverified" ? "Pending" as const : profile.status,
+        };
+        if (profile.emailVerified !== true || verifiedProfile.status !== profile.status) {
+          await updateDoc(doc(db, "userProfiles", current.uid), {
+            emailVerified: true,
+            status: verifiedProfile.status,
+          });
+        }
+        setActiveProfile(verifiedProfile);
+        if (verifiedProfile.status !== "Approved") {
+          await signOut(auth);
+          if (verifiedProfile.status === "Pending") setToast({ kind: "info", text: "Awaiting Approval for Admin. Your verified account is pending admin approval." });
+          else if (verifiedProfile.status === "Disapproved") setToast({ kind: "error", text: "This account was not approved. Contact your office administrator for assistance." });
+        }
       } catch { setActiveProfile(null); }
     });
     return () => { stopPrograms(); stopAuth(); };
@@ -393,8 +417,13 @@ export default function Experience() {
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email")).trim().toLowerCase();
     const password = String(form.get("password"));
+    authActionInProgress.current = true;
+    let loginUser: User | null = null;
     try {
       const credential = await signInWithEmailAndPassword(auth, email, password);
+      loginUser = credential.user;
+      await credential.user.reload();
+      await credential.user.getIdToken(true);
       if (email === SUPERADMIN_EMAIL) {
         if (!credential.user.emailVerified) {
           await sendEmailVerification(credential.user);
@@ -427,30 +456,46 @@ export default function Experience() {
         setToast({ kind: "success", text: `Welcome, ${profile.firstName}.` });
         return;
       }
-      setActiveProfile(profile);
-      if (profile.status === "Pending") {
+      if (!credential.user.emailVerified) {
+        await sendEmailVerification(credential.user);
         await signOut(auth);
-        setToast({ kind: "info", text: "Your account is awaiting approval. You can sign in after the administrator approves it." });
+        setActiveProfile(null);
+        setToast({ kind: "info", text: "Verify your email using the link we sent. Your account will appear for admin approval after verification." });
         setAuthOpen(false);
         return;
       }
-      if (profile.status === "Disapproved") {
+      const verifiedProfile: UserProfile = {
+        ...profile,
+        emailVerified: true,
+        status: profile.status === "Unverified" ? "Pending" : profile.status,
+      };
+      if (profile.emailVerified !== true || verifiedProfile.status !== profile.status) {
+        await updateDoc(doc(db, "userProfiles", credential.user.uid), {
+          emailVerified: true,
+          status: verifiedProfile.status,
+        });
+      }
+      setActiveProfile(verifiedProfile);
+      if (verifiedProfile.status === "Pending") {
+        await signOut(auth);
+        setToast({ kind: "info", text: "Awaiting Approval for Admin. Your verified account is pending admin approval." });
+        setAuthOpen(false);
+        return;
+      }
+      if (verifiedProfile.status === "Disapproved") {
         await signOut(auth);
         setToast({ kind: "error", text: "This account was not approved. Contact your office administrator for assistance." });
         setAuthOpen(false);
         return;
       }
-      if (!credential.user.emailVerified) {
-        await sendEmailVerification(credential.user);
-        await signOut(auth);
-        setToast({ kind: "info", text: "Your account is approved. A verification link has been sent to your email." });
-        setAuthOpen(false);
-        return;
-      }
       setSection("programs");
       setAuthOpen(false);
-      setToast({ kind: "success", text: `Welcome back, ${profile.firstName}.` });
-    } catch (error) { showError(error); }
+      setToast({ kind: "success", text: `Welcome back, ${verifiedProfile.firstName}.` });
+    } catch (error) {
+      if (loginUser && auth.currentUser?.uid === loginUser.uid) await signOut(auth).catch(() => undefined);
+      showError(error);
+    }
+    finally { authActionInProgress.current = false; }
   }
 
   async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
@@ -465,6 +510,7 @@ export default function Experience() {
     if (password !== confirmation) { setToast({ kind: "error", text: "The passwords do not match." }); return; }
     if (password.length < 6) { setToast({ kind: "error", text: "Choose a password with at least 6 characters." }); return; }
     if (phone.length !== 9) { setToast({ kind: "error", text: "Enter the 9 digits after +63 9." }); return; }
+    authActionInProgress.current = true;
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password);
       const profile: UserProfile = {
@@ -481,7 +527,8 @@ export default function Experience() {
         office: String(form.get("office")).trim(),
         email,
         role: "regular",
-        status: "Pending",
+        emailVerified: false,
+        status: "Unverified",
         createdAt: serverTimestamp(),
       };
       await (await import("firebase/firestore")).setDoc(doc(db, "userProfiles", credential.user.uid), profile);
@@ -490,8 +537,12 @@ export default function Experience() {
       formElement.reset();
       setAuthMode("login");
       setAuthOpen(true);
-      setToast({ kind: "success", text: "Verification link has been sent to your email. Check your inbox and verify your account. Sign-in will be available after approval." });
-    } catch (error) { showError(error); }
+      setToast({ kind: "success", text: "Verification link has been sent to your email. Check your inbox and verify your account. Verified accounts will appear for admin approval." });
+    } catch (error) {
+      if (auth.currentUser?.email?.toLowerCase() === email) await signOut(auth).catch(() => undefined);
+      showError(error);
+    }
+    finally { authActionInProgress.current = false; }
   }
 
   async function handleForgotPassword(email: string) {
@@ -808,7 +859,7 @@ export default function Experience() {
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>PROGRAMS & MATERIALS</small></span>
         </a>
         <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
+          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}
         </nav>
         <div className="topbar-actions">
           {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isAdmin ? "Superadmin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
@@ -941,11 +992,12 @@ function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, on
   profiles: UserProfile[]; loading: boolean; onChangeRole: (profile: UserProfile, role: UserRole) => void; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
 }) {
   const [filter, setFilter] = useState("Pending");
-  const filtered = profiles.filter((profile) => filter === "All" || profile.status === filter).sort((a, b) => (a.status === "Pending" ? -1 : 1));
-  const counts = { Pending: profiles.filter((p) => p.status === "Pending").length, Approved: profiles.filter((p) => p.status === "Approved").length, Disapproved: profiles.filter((p) => p.status === "Disapproved").length };
+  const verifiedProfiles = profiles.filter((profile) => profile.emailVerified === true);
+  const filtered = verifiedProfiles.filter((profile) => filter === "All" || profile.status === filter).sort((a, b) => (a.status === "Pending" ? -1 : 1));
+  const counts = { Pending: verifiedProfiles.filter((p) => p.status === "Pending").length, Approved: verifiedProfiles.filter((p) => p.status === "Approved").length, Disapproved: verifiedProfiles.filter((p) => p.status === "Disapproved").length };
   return <div className="content-wrap dashboard-page"><div className="dashboard-welcome"><div><span className="eyebrow"><ShieldCheck size={14} /> SUPERADMIN WORKSPACE</span><h1>Good morning,<br /><span>let’s keep things</span> <i>moving.</i></h1><p>Manage registrations, shape the program calendar, and keep resources organized.</p></div><div className="dashboard-date"><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date()).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric" }).format(new Date())}</strong><small>CARAGA · REGION XIII</small></div></div>
     <div className="admin-stats"><div className="admin-stat admin-stat--highlight"><span className="stat-label">NEEDS REVIEW</span><strong>{String(counts.Pending).padStart(2, "0")}</strong><span className="stat-foot"><span className="online-dot" />Pending registrations</span></div><div className="admin-stat"><span className="stat-label">APPROVED USERS</span><strong>{String(counts.Approved).padStart(2, "0")}</strong><span className="stat-foot">Cleared for sign-in</span></div><div className="admin-stat"><span className="stat-label">NOT APPROVED</span><strong>{String(counts.Disapproved).padStart(2, "0")}</strong><span className="stat-foot">Can be reviewed again</span></div><div className="admin-stat admin-quick-actions"><span className="stat-label">QUICK ACTIONS</span><button onClick={onAddProgram}><Plus size={15} /> Create a program <ArrowUpRight size={14} /></button><button onClick={onAddMaterial}><Plus size={15} /> Add a material <ArrowUpRight size={14} /></button></div></div>
-    <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User approval <span>& directory</span></h2><p>Approve an account to send its email verification link and unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
+    <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User approval <span>& directory</span></h2><p>Verified accounts appear here as Pending. Approve an account to unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
       <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>STATUS</th></tr></thead><tbody>
         {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{nameInitials(profile)}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="regular">regular</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
         {!filtered.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}

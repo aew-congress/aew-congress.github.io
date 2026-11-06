@@ -23,7 +23,23 @@ service cloud.firestore {
     function isApprovedMember() {
       return verified()
         && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
-        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.status == 'Approved';
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.status == 'Approved'
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.emailVerified == true;
+    }
+
+    function canConfirmEmailVerification(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && verified()
+        && request.auth.token.email == resource.data.email
+        && (!('emailVerified' in resource.data) || resource.data.emailVerified == false)
+        && request.resource.data.emailVerified == true
+        && (
+          (resource.data.status == 'Unverified' && request.resource.data.status == 'Pending')
+          || (resource.data.status in ['Pending', 'Approved', 'Disapproved']
+            && request.resource.data.status == resource.data.status)
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['emailVerified', 'status']);
     }
 
     match /userProfiles/{uid} {
@@ -34,16 +50,19 @@ service cloud.firestore {
         && request.resource.data.uid == uid
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.role == 'regular'
-        && request.resource.data.status == 'Pending'
+        && request.resource.data.emailVerified == false
+        && request.resource.data.status == 'Unverified'
         && request.resource.data.keys().hasOnly([
           'uid', 'firstName', 'middleName', 'lastName', 'suffix', 'birthdate',
           'sexAtBirth', 'contactNo', 'position', 'designation', 'office',
-          'email', 'role', 'status', 'createdAt'
+          'email', 'role', 'emailVerified', 'status', 'createdAt'
         ]);
-      allow update: if isSuperadmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt'])
-        && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'regular'])
-        && request.resource.data.status in ['Pending', 'Approved', 'Disapproved'];
+      allow update: if canConfirmEmailVerification(uid)
+        || (isSuperadmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt'])
+          && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'regular'])
+          && request.resource.data.status in ['Pending', 'Approved', 'Disapproved']
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) || resource.data.emailVerified == true));
       allow delete: if isSuperadmin();
     }
 

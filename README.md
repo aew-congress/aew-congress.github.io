@@ -18,7 +18,7 @@ The program page shows an example event until the first real program is publishe
 1. In Firebase Authentication, enable the Email/Password provider and add `aew-caraga.github.io` to the authorized domains.
 2. Create the Firestore database, then deploy `firestore.rules` with `firebase deploy --only firestore:rules`.
 3. Create the superadmin in Firebase Authentication using `rjamescute2@gmail.com`, set a fresh password in Firebase Console, and verify that email address. Superadmin access is granted only to that verified identity. Do not reuse a password shared in chat.
-4. Install Firebase's **Trigger Email** extension and configure its SMTP sender. It watches the `mail` collection. When a superadmin approves a member, the `sendApprovalVerification` function generates a Firebase verification link and writes the email to that collection.
+4. Member registration sends a Firebase email verification link. Unverified profiles are excluded from the approval directory. After verifying, the member signs in once to move the profile into the Pending queue. Pending members see an approval notice at login; only verified and approved accounts can sign in to member features.
 5. Deploy the UploadThing route on the Cloudflare Workers Free plan. From the repository root, run:
 
    ```bash
@@ -28,9 +28,7 @@ The program page shows an example event until the first real program is publishe
 
    Enter the UploadThing V7 token at Wrangler's hidden prompt. It is stored as an encrypted Worker secret and never reaches the static frontend or Git history. GitHub Pages builds are configured with the deployed Worker endpoint in `.github/workflows/deploy-pages.yml`.
 
-6. Run `firebase deploy --only firestore:rules,functions` after setup. The first command deploys the database rules; the Functions deploy also builds the TypeScript backend.
-
-The Firebase Trigger Email extension needs a working SMTP provider. Firebase generates the verification URL; the extension delivers the message.
+6. Deploy Firestore rules after any changes with `firebase deploy --only firestore:rules`. Uploads use the Cloudflare Worker, so Firebase Functions are not needed for the file upload endpoint.
 
 ## GitHub Pages
 
@@ -49,7 +47,7 @@ git push -u origin main
 
 - Public program listing with date, venue, daily session flow, search, and track filters.
 - Public materials shelf grouped by Guidelines, Presentation, References, and Worksheet.
-- Account registration with the requested member details, Philippine mobile format, password strength meter, and login/create-account flip transition.
+- Account registration with the requested member details, Philippine mobile format, email verification, and admin approval flow.
 - Superadmin approval queue with Pending, Approved, and Disapproved states.
-- Approval-triggered verification email; members cannot access signed-in views until approved and email-verified.
+- Unverified accounts stay out of the approval queue; members cannot access signed-in views until approved and email-verified.
 - Admin program and resource editors; file uploads pass through a Cloudflare Worker that validates the Firebase ID token and approved account before contacting UploadThing.

@@ -18,6 +18,7 @@ export const db = getFirestore(firebaseApp);
 export const SUPERADMIN_EMAIL = (process.env.NEXT_PUBLIC_SUPERADMIN_EMAIL || "rjamescute2@gmail.com").toLowerCase();
 
 export type AccountStatus = "Pending" | "Approved" | "Disapproved";
+export type UserRole = "superadmin" | "regular";
 
 export type UserProfile = {
   uid: string;
@@ -32,6 +33,8 @@ export type UserProfile = {
   designation: string;
   office: string;
   email: string;
+  /** Optional for records created before role management was added. */
+  role?: UserRole;
   status: AccountStatus;
   createdAt?: unknown;
 };

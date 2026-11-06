@@ -9,8 +9,15 @@ service cloud.firestore {
       return signedIn() && request.auth.token.email_verified == true;
     }
 
+    function profileIsSuperadmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'superadmin';
+    }
+
     function isSuperadmin() {
-      return verified() && request.auth.token.email == 'rjamescute2@gmail.com';
+      return verified()
+        && (request.auth.token.email == 'rjamescute2@gmail.com' || profileIsSuperadmin());
     }
 
     function isApprovedMember() {
@@ -26,14 +33,16 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'regular'
         && request.resource.data.status == 'Pending'
         && request.resource.data.keys().hasOnly([
           'uid', 'firstName', 'middleName', 'lastName', 'suffix', 'birthdate',
           'sexAtBirth', 'contactNo', 'position', 'designation', 'office',
-          'email', 'status', 'createdAt'
+          'email', 'role', 'status', 'createdAt'
         ]);
       allow update: if isSuperadmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt'])
+        && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'regular'])
         && request.resource.data.status in ['Pending', 'Approved', 'Disapproved'];
       allow delete: if isSuperadmin();
     }

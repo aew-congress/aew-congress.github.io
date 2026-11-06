@@ -24,11 +24,11 @@ export const uploadRouter = {
       }
 
       if (!decoded.email_verified) throw new UploadThingError("Verify your email address before uploading.");
-      if (decoded.email?.toLowerCase() !== SUPERADMIN_EMAIL) {
-        const profile = await getFirestore().doc(`userProfiles/${decoded.uid}`).get();
-        if (!profile.exists || profile.data()?.status !== "Approved") {
-          throw new UploadThingError("Only approved members can upload materials.");
-        }
+      const profile = await getFirestore().doc(`userProfiles/${decoded.uid}`).get();
+      const isSuperadmin = decoded.email?.toLowerCase() === SUPERADMIN_EMAIL
+        || (profile.exists && profile.data()?.role === "superadmin");
+      if (!isSuperadmin && (!profile.exists || profile.data()?.status !== "Approved")) {
+        throw new UploadThingError("Only approved members can upload materials.");
       }
 
       return { uid: decoded.uid };

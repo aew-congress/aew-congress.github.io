@@ -14,7 +14,7 @@ import {
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
+import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
@@ -46,6 +46,11 @@ function dateRange(from: string, to: string) {
 
 function fullName(person: Partial<UserProfile>) {
   return [person.firstName, person.middleName, person.lastName, person.suffix].filter(Boolean).join(" ");
+}
+
+function profileRole(profile: Partial<UserProfile>): UserRole {
+  if (profile.email?.toLowerCase() === SUPERADMIN_EMAIL) return "superadmin";
+  return profile.role ?? "regular";
 }
 
 function passwordScore(value: string) {
@@ -159,8 +164,8 @@ export default function Experience() {
   const [cloudIssue, setCloudIssue] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const isAdmin = Boolean(user && user.email?.toLowerCase() === SUPERADMIN_EMAIL && user.emailVerified);
-  const isApprovedMember = Boolean(user && activeProfile?.status === "Approved" && user.emailVerified);
+  const isAdmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
+  const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const signedIn = isAdmin || isApprovedMember;
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const days = useMemo(() => {
@@ -204,6 +209,15 @@ export default function Experience() {
         const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
         if (!profileSnapshot.exists()) { await signOut(auth); return; }
         const profile = profileSnapshot.data() as UserProfile;
+        if (profileRole(profile) === "superadmin") {
+          if (!current.emailVerified) {
+            await signOut(auth);
+            setToast({ kind: "info", text: "Verify your email address before using superadmin tools." });
+            return;
+          }
+          setActiveProfile(profile);
+          return;
+        }
         if (profile.status !== "Approved" || !current.emailVerified) {
           await signOut(auth);
           setActiveProfile(profile);
@@ -277,15 +291,18 @@ export default function Experience() {
 
   async function getVerifiedSuperadmin() {
     const current = auth.currentUser;
-    if (!current) throw new Error(`Sign in with the superadmin account (${SUPERADMIN_EMAIL}) to make this change.`);
+    if (!current) throw new Error("Sign in with a verified superadmin account to make this change.");
     await current.reload();
     const token = await current.getIdTokenResult(true);
     const tokenEmail = String(token.claims.email ?? current.email ?? "").trim().toLowerCase();
-    if (tokenEmail !== SUPERADMIN_EMAIL) {
-      throw new Error(`This session is signed in as ${tokenEmail || "an unknown account"}. Sign in as ${SUPERADMIN_EMAIL} to make this change.`);
-    }
     if (token.claims.email_verified !== true) {
-      throw new Error(`Verify ${SUPERADMIN_EMAIL}, then sign out and sign in again before making this change.`);
+      throw new Error("Verify your email address, then sign out and sign in again before making this change.");
+    }
+    if (tokenEmail !== SUPERADMIN_EMAIL) {
+      const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
+      if (!profileSnapshot.exists() || profileRole(profileSnapshot.data() as UserProfile) !== "superadmin") {
+        throw new Error("Only a verified superadmin can make this change.");
+      }
     }
     return current;
   }
@@ -315,6 +332,20 @@ export default function Experience() {
         throw new Error("We couldn't find a registration for this account. Please create an account first.");
       }
       const profile = profileSnapshot.data() as UserProfile;
+      if (profileRole(profile) === "superadmin") {
+        if (!credential.user.emailVerified) {
+          await sendEmailVerification(credential.user);
+          await signOut(auth);
+          setToast({ kind: "info", text: "Verify your email address before using superadmin tools." });
+          setAuthOpen(false);
+          return;
+        }
+        setActiveProfile(profile);
+        setSection("approval");
+        setAuthOpen(false);
+        setToast({ kind: "success", text: `Welcome, ${profile.firstName}.` });
+        return;
+      }
       setActiveProfile(profile);
       if (profile.status === "Pending") {
         await signOut(auth);
@@ -368,6 +399,7 @@ export default function Experience() {
         designation: String(form.get("designation")).trim(),
         office: String(form.get("office")).trim(),
         email,
+        role: "regular",
         status: "Pending",
         createdAt: serverTimestamp(),
       };
@@ -402,11 +434,23 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
+  async function changeRole(profile: UserProfile, role: UserRole) {
+    if (profile.email.toLowerCase() === SUPERADMIN_EMAIL && role !== "superadmin") {
+      setToast({ kind: "error", text: "The primary superadmin role cannot be removed." });
+      return;
+    }
+    try {
+      await updateDoc(doc(db, "userProfiles", profile.uid), { role, roleUpdatedAt: serverTimestamp() });
+      if (profile.uid === user?.uid) setActiveProfile({ ...profile, role });
+      setToast({ kind: "success", text: `${fullName(profile)} is now ${role}.` });
+    } catch (error) { showError(error); }
+  }
+
   async function createProgram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !isAdmin) {
       setProgramModal(false);
-      setToast({ kind: "error", text: `Sign in with the verified superadmin account (${SUPERADMIN_EMAIL}) to publish programs.` });
+      setToast({ kind: "error", text: "Sign in with a verified superadmin account to publish programs." });
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -522,7 +566,7 @@ export default function Experience() {
     event.preventDefault();
     if (!user || !isAdmin) {
       setContestMechanicsModal(false);
-      setToast({ kind: "error", text: `Sign in with the verified superadmin account (${SUPERADMIN_EMAIL}) to add contest mechanics.` });
+      setToast({ kind: "error", text: "Sign in with a verified superadmin account to add contest mechanics." });
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -695,7 +739,7 @@ export default function Experience() {
 
       <main id="top">
         {section === "approval" && isAdmin ? (
-          <ApprovalDashboard profiles={profiles} loading={loading} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
+          <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} onBack={() => setSection("approval")} />
         ) : section === "contestMechanics" && isAdmin ? (
@@ -817,8 +861,8 @@ function Field({ label, icon, children }: { label: string; icon?: React.ReactNod
   return <label className="field"><span className="field-label">{icon}{label}</span><span className="field-control">{children}</span></label>;
 }
 
-function ApprovalDashboard({ profiles, loading, onChangeStatus, onAddProgram, onAddMaterial }: {
-  profiles: UserProfile[]; loading: boolean; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
+function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, onAddProgram, onAddMaterial }: {
+  profiles: UserProfile[]; loading: boolean; onChangeRole: (profile: UserProfile, role: UserRole) => void; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
 }) {
   const [filter, setFilter] = useState("Pending");
   const filtered = profiles.filter((profile) => filter === "All" || profile.status === filter).sort((a, b) => (a.status === "Pending" ? -1 : 1));
@@ -826,9 +870,9 @@ function ApprovalDashboard({ profiles, loading, onChangeStatus, onAddProgram, on
   return <div className="content-wrap dashboard-page"><div className="dashboard-welcome"><div><span className="eyebrow"><ShieldCheck size={14} /> SUPERADMIN WORKSPACE</span><h1>Good morning,<br /><span>let’s keep things</span> <i>moving.</i></h1><p>Manage registrations, shape the program calendar, and keep resources organized.</p></div><div className="dashboard-date"><span>{new Intl.DateTimeFormat("en-PH", { weekday: "long" }).format(new Date()).toUpperCase()}</span><strong>{new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric" }).format(new Date())}</strong><small>CARAGA · REGION XIII</small></div></div>
     <div className="admin-stats"><div className="admin-stat admin-stat--highlight"><span className="stat-label">NEEDS REVIEW</span><strong>{String(counts.Pending).padStart(2, "0")}</strong><span className="stat-foot"><span className="online-dot" />Pending registrations</span></div><div className="admin-stat"><span className="stat-label">APPROVED USERS</span><strong>{String(counts.Approved).padStart(2, "0")}</strong><span className="stat-foot">Cleared for sign-in</span></div><div className="admin-stat"><span className="stat-label">NOT APPROVED</span><strong>{String(counts.Disapproved).padStart(2, "0")}</strong><span className="stat-foot">Can be reviewed again</span></div><div className="admin-stat admin-quick-actions"><span className="stat-label">QUICK ACTIONS</span><button onClick={onAddProgram}><Plus size={15} /> Create a program <ArrowUpRight size={14} /></button><button onClick={onAddMaterial}><Plus size={15} /> Add a material <ArrowUpRight size={14} /></button></div></div>
     <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User approval <span>& directory</span></h2><p>Approve an account to send its email verification link and unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
-      <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>STATUS</th></tr></thead><tbody>
-        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{(profile.firstName?.[0] || "?")}{(profile.lastName?.[0] || "")}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
-        {!filtered.length && <tr><td colSpan={5} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}
+      <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>STATUS</th></tr></thead><tbody>
+        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{(profile.firstName?.[0] || "?")}{(profile.lastName?.[0] || "")}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="regular">regular</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
+        {!filtered.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}
       </tbody></table></div><div className="table-footnote"><span><LockKeyhole size={13} /> Personal details are private to superadmins.</span><span>{filtered.length} {filtered.length === 1 ? "account" : "accounts"}</span></div>
     </section>
   </div>;

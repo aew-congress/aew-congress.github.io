@@ -1,9 +1,27 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://aew-caraga.github.io";
+const shareTitle = "AEW Congress | Programs & Learning Materials";
+const shareDescription = "AEW Congress recognizes, empowers, and supports agricultural and fishery extension workers and beyond.";
+
 export const metadata: Metadata = {
-  title: "AEW Congress | Programs & Learning Materials",
-  description: "Programs, daily session flows, and learning materials for AEW Congress.",
+  metadataBase: new URL(siteUrl),
+  title: shareTitle,
+  description: shareDescription,
+  openGraph: {
+    type: "website",
+    siteName: "AEW Congress",
+    title: shareTitle,
+    description: shareDescription,
+    images: [{ url: "/og.png", width: 1732, height: 908, alt: shareDescription }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: shareTitle,
+    description: shareDescription,
+    images: ["/og.png"],
+  },
   icons: {
     icon: "/AEW_logo.png",
     shortcut: "/AEW_logo.png",

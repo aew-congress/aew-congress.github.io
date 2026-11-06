@@ -460,7 +460,7 @@ export default function Experience() {
         await sendEmailVerification(credential.user);
         await signOut(auth);
         setActiveProfile(null);
-        setToast({ kind: "info", text: "Verify your email using the link we sent, then sign in again to enter the admin approval queue." });
+        setToast({ kind: "info", text: "Verify your email using the link we sent. Your account will then appear in the superadmin approval queue automatically." });
         setAuthOpen(false);
         return;
       }
@@ -537,7 +537,7 @@ export default function Experience() {
       formElement.reset();
       setAuthMode("login");
       setAuthOpen(true);
-      setToast({ kind: "success", text: "Verification link has been sent to your email. Verify your account, then sign in once to enter the admin approval queue." });
+      setToast({ kind: "success", text: "Verification link has been sent to your email. Once verified, your account will appear in the superadmin approval queue automatically." });
     } catch (error) {
       if (auth.currentUser?.email?.toLowerCase() === email) await signOut(auth).catch(() => undefined);
       showError(error);

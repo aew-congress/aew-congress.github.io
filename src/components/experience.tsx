@@ -144,9 +144,12 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
 export default function Experience() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [contestMechanics, setContestMechanics] = useState<ContestMechanics[]>([]);
+  const [contestJoins, setContestJoins] = useState<ContestJoin[]>([]);
+  const [contestJoinsLoading, setContestJoinsLoading] = useState(false);
   const [joinedContestIds, setJoinedContestIds] = useState<string[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
   const [section, setSection] = useState<Section>("home");
@@ -272,10 +275,26 @@ export default function Experience() {
   }, [isApprovedMember, user?.uid]);
 
   useEffect(() => {
-    if (!isAdmin) { setProfiles([]); return; }
+    if (!isAdmin) {
+      setContestJoins([]);
+      setContestJoinsLoading(false);
+      return;
+    }
+    setContestJoinsLoading(true);
+    const stopJoins = onSnapshot(collection(db, "contestJoins"), (snapshot) => {
+      setContestJoins(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ContestJoin)));
+      setContestJoinsLoading(false);
+    }, (error) => { setCloudIssue(errorText(error)); setContestJoinsLoading(false); });
+    return stopJoins;
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) { setProfiles([]); setProfilesLoading(false); return; }
+    setProfilesLoading(true);
     const stopProfiles = onSnapshot(query(collection(db, "userProfiles"), orderBy("createdAt", "desc")), (snapshot) => {
       setProfiles(snapshot.docs.map((entry) => entry.data() as UserProfile));
-    }, (error) => setCloudIssue(errorText(error)));
+      setProfilesLoading(false);
+    }, (error) => { setCloudIssue(errorText(error)); setProfilesLoading(false); });
     return stopProfiles;
   }, [isAdmin]);
 
@@ -749,7 +768,7 @@ export default function Experience() {
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} onBack={() => setSection("approval")} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
+          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
           <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
         ) : section === "materials" ? (
@@ -902,18 +921,36 @@ function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
   return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
 }
 
-function ContestMechanicsPage({ mechanics, programs, loading, onAdd, onEdit, onDelete }: {
-  mechanics: ContestMechanics[]; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
+function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, programs, loading, onAdd, onEdit, onDelete }: {
+  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
 }) {
-  return <div className="content-wrap dashboard-page contest-page">
-    <div className="section-heading contest-heading"><div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and scoring weights for published programs.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
-    <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>Each contest groups its criteria and total weight under the selected program.</p></div><span className="contest-count">{String(mechanics.length).padStart(2, "0")} CONTESTS</span></div>
-      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>TOTAL WEIGHT</th><th>ACTIONS</th></tr></thead><tbody>
-        {mechanics.map((item) => <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><strong className="contest-weight">{contestWeightTotal(item.criteria)}%</strong></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>)}
-        {!mechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
-      </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
-    </section>
-  </div>;
+  const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
+  const profilesByUid = new Map(profiles.map((profile) => [profile.uid, profile]));
+  const selectedJoins = viewingContestants ? joins.filter((join) => join.contestId === viewingContestants.id) : [];
+  const sortedJoins = selectedJoins.slice().sort((a, b) => {
+    const nameA = fullName(profilesByUid.get(a.uid) ?? {}).toLowerCase();
+    const nameB = fullName(profilesByUid.get(b.uid) ?? {}).toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+
+  return <>
+    <div className="content-wrap dashboard-page contest-page">
+      <div className="section-heading contest-heading"><div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
+      <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>View each contest's criteria and registered contestants.</p></div><span className="contest-count">{String(mechanics.length).padStart(2, "0")} CONTESTS</span></div>
+        <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
+          {mechanics.map((item) => {
+            const contestantCount = joins.filter((join) => join.contestId === item.id).length;
+            return <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => setViewingContestants(item)}><Eye size={15} />View</button></div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
+          })}
+          {!mechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
+        </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can view contestant details and edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
+      </section>
+    </div>
+    {viewingContestants && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewingContestants(null); }}><section className="form-modal contestants-modal" role="dialog" aria-modal="true" aria-labelledby="contestants-modal-title"><div className="form-modal-head"><div><span className="eyebrow">CONTESTANTS</span><h2 id="contestants-modal-title">{viewingContestants.contest}<span>.</span></h2><p>{viewingContestants.eventTitle} · {dateRange(viewingContestants.dateFrom, viewingContestants.dateTo)}</p></div><button className="modal-close modal-close--inline" onClick={() => setViewingContestants(null)} aria-label="Close contestants list"><X size={19} /></button></div><div className="contestants-table-wrap"><table className="approval-table contestants-table"><thead><tr><th>NAME</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th></tr></thead><tbody>{contestantsLoading ? <tr><td colSpan={4} className="empty-table">Loading contestants…</td></tr> : sortedJoins.length ? sortedJoins.map((join) => {
+      const profile = profilesByUid.get(join.uid);
+      return <tr key={join.id}><td><strong className="table-primary">{profile ? fullName(profile) || "Member" : "Member profile unavailable"}</strong></td><td>{profile?.designation || "—"}</td><td>{profile?.office || "—"}</td><td>{profile?.contactNo || "—"}</td></tr>;
+    }) : <tr><td colSpan={4} className="empty-table"><UsersRound size={20} /><strong>No contestants yet</strong><span>Members who join this contest will appear here.</span></td></tr>}</tbody></table></div><div className="form-modal-actions"><button className="button button--soft" onClick={() => setViewingContestants(null)}>Close</button></div></section></div>}
+  </>;
 }
 
 function ContestsPage({ contests, joinedContestIds, joiningContestId, loading, onJoin }: {

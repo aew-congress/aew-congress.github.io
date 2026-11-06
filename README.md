@@ -1,6 +1,6 @@
 # AEW Congress
 
-A responsive program calendar and resource library for the AEW Congress community. The frontend is a Next.js static export for GitHub Pages. Firebase provides authentication, Firestore data, and approval email delivery; a Firebase Function exposes the protected UploadThing endpoint.
+A responsive program calendar and resource library for the AEW Congress community. The frontend is a Next.js static export for GitHub Pages. Firebase provides authentication and Firestore data; a Cloudflare Worker exposes the protected UploadThing endpoint without requiring Firebase Blaze.
 
 ## Run locally
 
@@ -19,14 +19,14 @@ The program page shows an example event until the first real program is publishe
 2. Create the Firestore database, then deploy `firestore.rules` with `firebase deploy --only firestore:rules`.
 3. Create the superadmin in Firebase Authentication using `rjamescute2@gmail.com`, set a fresh password in Firebase Console, and verify that email address. Superadmin access is granted only to that verified identity. Do not reuse a password shared in chat.
 4. Install Firebase's **Trigger Email** extension and configure its SMTP sender. It watches the `mail` collection. When a superadmin approves a member, the `sendApprovalVerification` function generates a Firebase verification link and writes the email to that collection.
-5. Rotate the UploadThing key that was shared in the original setup message before using uploads. Create a current UploadThing V7 token in its dashboard, then save the replacement directly into Firebase Secret Manager; never add it to `.env.local`, GitHub, or source files:
+5. Deploy the UploadThing route on the Cloudflare Workers Free plan. From the repository root, run:
 
    ```bash
-   firebase functions:secrets:set UPLOADTHING_TOKEN
-   firebase deploy --only functions
+   npx wrangler secret put UPLOADTHING_TOKEN --config uploadthing-worker/wrangler.jsonc
+   npx wrangler deploy --config uploadthing-worker/wrangler.jsonc
    ```
 
-   The token is bound only to the server function and never reaches the static frontend. The default frontend endpoint is `https://us-central1-aew-caraga.cloudfunctions.net/uploadthing/api/uploadthing`; override it with `NEXT_PUBLIC_UPLOADTHING_URL` if the function URL differs.
+   Enter the UploadThing V7 token at Wrangler's hidden prompt. It is stored as an encrypted Worker secret and never reaches the static frontend or Git history. GitHub Pages builds are configured with the deployed Worker endpoint in `.github/workflows/deploy-pages.yml`.
 
 6. Run `firebase deploy --only firestore:rules,functions` after setup. The first command deploys the database rules; the Functions deploy also builds the TypeScript backend.
 
@@ -52,4 +52,4 @@ git push -u origin main
 - Account registration with the requested member details, Philippine mobile format, password strength meter, and login/create-account flip transition.
 - Superadmin approval queue with Pending, Approved, and Disapproved states.
 - Approval-triggered verification email; members cannot access signed-in views until approved and email-verified.
-- Admin program and resource editors; file uploads pass through a Firebase Function that validates a Firebase ID token before contacting UploadThing.
+- Admin program and resource editors; file uploads pass through a Cloudflare Worker that validates the Firebase ID token and approved account before contacting UploadThing.

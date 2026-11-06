@@ -23,29 +23,6 @@ const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting",
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 
-const demoProgram: Program = {
-  id: "preview-program",
-  eventTitle: "AEW Caraga Learning Exchange",
-  dateFrom: "2026-11-24",
-  dateTo: "2026-11-26",
-  venue: "Butuan City, Caraga Region",
-  description: "A sample program preview. Published events will appear here.",
-  flow: [
-    { date: "2026-11-24", time: "08:00–09:00", session: "Arrival and participant registration", track: "Logistics", responsible: "Secretariat" },
-    { date: "2026-11-24", time: "09:00–09:20", session: "Welcome and opening message", track: "Opening", responsible: "Program team" },
-    { date: "2026-11-24", time: "09:20–10:15", session: "Building stronger extension partnerships", track: "Plenary", responsible: "Resource speaker" },
-    { date: "2026-11-24", time: "10:15–10:30", session: "Morning break", track: "Break", responsible: "—" },
-    { date: "2026-11-24", time: "10:30–12:00", session: "Field practices: sharing and reflection", track: "Breakout", responsible: "Facilitators" },
-    { date: "2026-11-25", time: "08:30–09:00", session: "Recap and learning check-in", track: "Meeting", responsible: "Facilitators" },
-    { date: "2026-11-25", time: "09:00–10:30", session: "Designing inclusive learning activities", track: "Plenary", responsible: "Resource speaker" },
-    { date: "2026-11-25", time: "10:30–10:45", session: "Morning break", track: "Break", responsible: "—" },
-    { date: "2026-11-25", time: "10:45–12:00", session: "Workshop: turn insights into action", track: "Breakout", responsible: "Table facilitators" },
-    { date: "2026-11-26", time: "08:30–09:00", session: "Daily check-in", track: "Meeting", responsible: "Secretariat" },
-    { date: "2026-11-26", time: "09:00–10:30", session: "Sharing commitments and next steps", track: "Plenary", responsible: "Participants" },
-    { date: "2026-11-26", time: "10:30–11:00", session: "Closing and recognition", track: "Closing", responsible: "Program team" },
-  ],
-};
-
 const trackColors: Record<string, string> = {
   Break: "track-break", Breakout: "track-breakout", Closing: "track-closing",
   Logistics: "track-logistics", Meeting: "track-meeting", Opening: "track-opening", Plenary: "track-plenary",
@@ -103,7 +80,7 @@ export default function Experience() {
   const [user, setUser] = useState<User | null>(null);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
   const [section, setSection] = useState<Section>("programs");
-  const [selectedProgramId, setSelectedProgramId] = useState("preview-program");
+  const [selectedProgramId, setSelectedProgramId] = useState("");
   const [selectedDay, setSelectedDay] = useState(0);
   const [trackFilter, setTrackFilter] = useState<string>("All tracks");
   const [search, setSearch] = useState("");
@@ -120,8 +97,7 @@ export default function Experience() {
   const isAdmin = Boolean(user && user.email?.toLowerCase() === SUPERADMIN_EMAIL && user.emailVerified);
   const isApprovedMember = Boolean(user && activeProfile?.status === "Approved" && user.emailVerified);
   const signedIn = isAdmin || isApprovedMember;
-  const allPrograms = programs.length ? programs : [demoProgram];
-  const selectedProgram = allPrograms.find((program) => program.id === selectedProgramId) ?? allPrograms[0];
+  const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const days = useMemo(() => {
     if (!selectedProgram) return [];
     const first = new Date(`${selectedProgram.dateFrom}T12:00:00`);
@@ -191,7 +167,7 @@ export default function Experience() {
   }, [isAdmin]);
 
   useEffect(() => {
-    if (programs.length && (!selectedProgramId || selectedProgramId === "preview-program" || !programs.some((program) => program.id === selectedProgramId))) {
+    if (programs.length && (!selectedProgramId || !programs.some((program) => program.id === selectedProgramId))) {
       setSelectedProgramId(programs[0].id);
       setSelectedDay(0);
     }
@@ -419,38 +395,38 @@ export default function Experience() {
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} onAddProgram={() => setProgramModal(true)} onAddMaterial={() => setMaterialModal(true)} onBack={() => setSection("approval")} />
         ) : section === "materials" ? (
-          <MaterialsPage materials={materials} programs={allPrograms} isAdmin={isAdmin} onAdd={() => setMaterialModal(true)} loading={loading} />
+          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => setMaterialModal(true)} loading={loading} />
         ) : (
           <>
             <section className="hero content-wrap">
               <div className="hero-copy">
                 <span className="eyebrow"><span className="eyebrow-dot" />A shared space for learning</span>
                 <h1>Good programs<br /><span>make room</span> for <i>growth.</i></h1>
-                <p>Explore upcoming learning sessions, find your daily flow, and keep every useful resource close at hand.</p>
+                <p>Explore published learning sessions, follow the daily flow, and find resources shared by the community.</p>
                 <div className="hero-actions"><button className="button button--olive" onClick={() => document.getElementById("program-list")?.scrollIntoView({ behavior: "smooth" })}>Explore programs <ArrowDownRight size={17} /></button><button className="text-action" onClick={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }}>{signedIn ? "Browse materials" : "Member access"} <ArrowRight size={16} /></button></div>
-                <div className="hero-note"><div className="avatar-stack"><span>AG</span><span>RC</span><span>+12</span></div><span>Made for the people who<br /><strong>grow our communities.</strong></span></div>
+                <div className="hero-note"><Leaf size={17} /><span>For agricultural extension workers<br /><strong>across the Caraga Region.</strong></span></div>
               </div>
               <div className="hero-art" aria-hidden="true">
                 <div className="art-sun" />
-                <div className="art-card art-card--back"><span className="mini-label">NEXT GATHERING</span><span className="art-date">NOV<br /><strong>24</strong></span><span className="art-year">TUESDAY · 2026</span></div>
-                <div className="art-card art-card--front"><div className="art-leaf"><Leaf size={25} /></div><span className="mini-label">CARAGA REGION</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail"><MapPin size={13} /> Butuan City</span></div>
+                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><Leaf size={25} /></div><span className="art-year">AEW CARAGA</span></div>
+                <div className="art-card art-card--front"><div className="art-leaf"><Leaf size={25} /></div><span className="mini-label">CARAGA REGION XIII</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail">Shared knowledge for stronger communities</span></div>
                 <div className="art-sticker"><Sparkles size={15} /><span>Curiosity<br />in action</span></div>
-                <span className="art-caption">FIELD NOTES · VOL. 01</span>
+                <span className="art-caption">LEARN / SHARE / GROW</span>
               </div>
-              <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>01 <i>—</i> 03 <small> / 2026</small></span></div>
+              <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>AEW CARAGA / REGION XIII</span></div>
             </section>
 
             <section className="content-wrap program-section" id="program-list">
               <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>PROGRAMS</span></span>{isAdmin && <button className="button button--soft" onClick={() => setProgramModal(true)}><Plus size={16} /> New program</button>}</div></div>
               <div className="program-cards">
-                {allPrograms.map((program, index) => <button key={program.id} className={`program-card ${selectedProgram?.id === program.id ? "program-card--selected" : ""}`} onClick={() => { setSelectedProgramId(program.id); setSelectedDay(0); }}>
+                {programs.map((program, index) => <button key={program.id} className={`program-card ${selectedProgram?.id === program.id ? "program-card--selected" : ""}`} onClick={() => { setSelectedProgramId(program.id); setSelectedDay(0); }}>
                   <span className={`program-card-num program-card-num--${index % 3}`}>{String(index + 1).padStart(2, "0")}</span><div className="program-card-main"><span className="card-date"><CalendarDays size={13} />{dateRange(program.dateFrom, program.dateTo)}</span><h3>{program.eventTitle}</h3><span className="card-location"><MapPin size={13} />{program.venue}</span></div><span className="program-card-arrow"><ArrowUpRight size={18} /></span>
                 </button>)}
               </div>
-              {!programs.length && <div className="preview-note"><Sparkles size={14} /> Showing a sample program preview while your organization builds its calendar.</div>}
+              {!programs.length && <div className="program-empty"><CalendarDays size={22} /><div><strong>{loading ? "Loading programs..." : "No programs have been published yet."}</strong><span>{loading ? "Published programs will appear here." : isAdmin ? "Add a program to share it with the community." : "Please check back later for upcoming programs."}</span></div>{isAdmin && !loading && <button className="button button--soft" onClick={() => setProgramModal(true)}><Plus size={16} /> New program</button>}</div>}
             </section>
 
-            <section className="content-wrap schedule-section" id="schedule">
+            {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
               <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label><label className="filter-select"><Filter size={14} /><select value={trackFilter} onChange={(e) => setTrackFilter(e.target.value)} aria-label="Filter by track"><option>All tracks</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><ChevronDown size={13} /></label></div></div>
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2><p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
@@ -459,7 +435,7 @@ export default function Experience() {
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button onClick={() => window.print()}><Download size={15} /> Print schedule</button></div>
-            </section>
+            </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => setProgramModal(true)}><Plus size={16} /> Create a program</button>}</section>}
 
             {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} />}
             {cloudIssue && <div className="content-wrap cloud-notice"><CircleHelp size={16} /><span>Live data isn’t connected yet. {cloudIssue === "Missing or insufficient permissions." ? "Add the provided Firestore rules and enable sign-in in Firebase." : cloudIssue}</span></div>}
@@ -471,7 +447,7 @@ export default function Experience() {
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal onClose={() => setProgramModal(false)} onCreate={createProgram} />}
-      {materialModal && <MaterialModal programs={allPrograms.filter((program) => program.id !== "preview-program")} onClose={() => setMaterialModal(false)} onCreate={createMaterial} busy={uploadBusy} />}
+      {materialModal && <MaterialModal programs={programs} onClose={() => setMaterialModal(false)} onCreate={createMaterial} busy={uploadBusy} />}
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
   );
@@ -520,7 +496,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
           <p className="auth-switch">Already registered? <button type="button" onClick={() => setMode("login")}>Log in</button></p>
         </form>}
       </div>
-      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CARAGA<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><Leaf size={52} strokeWidth={1.2} /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span><span>01 / 03</span></div></aside>
+      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CARAGA<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><Leaf size={52} strokeWidth={1.2} /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
     </div>
   </div>;
 }
@@ -568,9 +544,7 @@ function MaterialsPage({ materials, programs, isAdmin, onAdd, loading }: { mater
 }
 
 function MaterialsTeaser({ materials, onOpen }: { materials: Material[]; onOpen: () => void }) {
-  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find the guides, presentations, and worksheets you need to put learning into practice.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{(materials.length ? materials.slice(0, 3) : [
-    { id: "a", name: "Facilitation guides", category: "Guidelines" }, { id: "b", name: "Session presentations", category: "Presentation" }, { id: "c", name: "Field worksheets", category: "Worksheet" },
-  ] as Material[]).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{materials.length ? item.name : item.category}</strong><small>{materials.length ? item.category : "Shared learning material"}</small></span><span className="shelf-open"><ArrowUpRight size={15} /></span></div>)}</div><div className="shelf-bottom"><span><span className="online-dot" /> A growing library</span><span>CARAGA REGION XIII</span></div></div></section>;
+  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find guides, presentations, and worksheets shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><span className="shelf-open"><ArrowUpRight size={15} /></span></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
 function ProgramModal({ onClose, onCreate }: { onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {

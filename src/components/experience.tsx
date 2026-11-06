@@ -14,7 +14,7 @@ import {
   EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
+import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
 import { uploadFiles } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
@@ -57,6 +57,60 @@ function passwordScore(value: string) {
   if (/\d/.test(value)) score++;
   if (/[^A-Za-z0-9]/.test(value)) score++;
   return Math.min(score, 5);
+}
+
+const emptyResponsiblePerson = (): ResponsiblePerson => ({ name: "", designation: "", office: "" });
+
+function parseTimeValue(value: string | undefined) {
+  if (!value) return "";
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return "";
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (minute > 59 || hour > 23) return "";
+  const period = match[3]?.toUpperCase();
+  if (period) {
+    if (hour < 1 || hour > 12) return "";
+    hour = (hour % 12) + (period === "PM" ? 12 : 0);
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function sessionTimeRange(item: ProgramSession) {
+  let startTime = parseTimeValue(item.startTime);
+  let endTime = parseTimeValue(item.endTime);
+  if (!startTime || !endTime) {
+    const legacyRange = String(item.time ?? "").split(/\s*[–—-]\s*/);
+    if (!startTime) startTime = parseTimeValue(legacyRange[0]);
+    if (!endTime) endTime = parseTimeValue(legacyRange[1]);
+  }
+  return { startTime, endTime };
+}
+
+function formatTimeValue(value: string) {
+  const [hourValue, minute] = value.split(":");
+  const hour = Number(hourValue);
+  const period = hour >= 12 ? "PM" : "AM";
+  return `${String(hour % 12 || 12).padStart(2, "0")}:${minute} ${period}`;
+}
+
+function sessionTimeLabel(item: ProgramSession) {
+  const { startTime, endTime } = sessionTimeRange(item);
+  if (startTime && endTime) return `${formatTimeValue(startTime)} – ${formatTimeValue(endTime)}`;
+  return item.time?.trim() || "—";
+}
+
+function responsiblePeople(value: ProgramSession["responsible"]): ResponsiblePerson[] {
+  if (Array.isArray(value)) return value.map((person) => ({
+    name: String(person?.name ?? ""),
+    designation: String(person?.designation ?? ""),
+    office: String(person?.office ?? ""),
+  }));
+  return typeof value === "string" && value.trim() ? [{ name: value.trim(), designation: "", office: "" }] : [];
+}
+
+function responsibleSearchText(value: ProgramSession["responsible"]) {
+  return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
 }
 
 function errorText(error: unknown) {
@@ -124,9 +178,9 @@ export default function Experience() {
       const matchesDay = item.date === selectedDate;
       const matchesTrack = trackFilter === "All tracks" || item.track === trackFilter;
       const needle = search.trim().toLowerCase();
-      const matchesSearch = !needle || `${item.session} ${item.responsible} ${item.track}`.toLowerCase().includes(needle);
+      const matchesSearch = !needle || `${item.session} ${responsibleSearchText(item.responsible)} ${item.track}`.toLowerCase().includes(needle);
       return matchesDay && matchesTrack && matchesSearch;
-    }).sort((a, b) => a.time.localeCompare(b.time));
+    }).sort((a, b) => (sessionTimeRange(a).startTime || a.time || "").localeCompare(sessionTimeRange(b).startTime || b.time || ""));
   }, [days, selectedDay, selectedProgram, search, trackFilter]);
 
   useEffect(() => {
@@ -356,7 +410,11 @@ export default function Experience() {
       return;
     }
     const form = new FormData(event.currentTarget);
-    const flow = JSON.parse(String(form.get("flowJson"))) as ProgramSession[];
+    const flow = (JSON.parse(String(form.get("flowJson"))) as ProgramSession[]).map((item) => {
+      const normalized = { ...item };
+      delete normalized.time;
+      return { ...normalized, ...sessionTimeRange(item), responsible: responsiblePeople(item.responsible) };
+    });
     const payload = {
       eventTitle: String(form.get("eventTitle")).trim(),
       dateFrom: String(form.get("dateFrom")),
@@ -682,7 +740,7 @@ export default function Experience() {
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2><p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
-                {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{item.time}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person">{item.responsible || "—"}</td></tr>)}
+                {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{sessionTimeLabel(item)}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><div className="session-person-list">{responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office).length ? responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office).map((person, personIndex) => <span key={`${person.name}-${personIndex}`}><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>) : "—"}</div></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button onClick={() => window.print()}><Download size={15} /> Print schedule</button></div>
@@ -865,9 +923,17 @@ function MaterialsTeaser({ materials, onOpen }: { materials: Material[]; onOpen:
 }
 
 function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow : [{ date: "", time: "", session: "", track: "", responsible: "" }]);
-  const updateSession = (index: number, key: keyof ProgramSession, value: string) => setSessions((current) => current.map((session, i) => i === index ? { ...session, [key]: value } : session));
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" defaultValue={initialProgram?.venue ?? ""} placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" defaultValue={initialProgram?.dateFrom ?? ""} onChange={(event) => { if (!sessions[0]?.date) updateSession(0, "date", event.target.value); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" defaultValue={initialProgram?.dateTo ?? ""} required /></Field><Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, time, and track.</p></div><button type="button" className="text-action" onClick={() => setSessions((current) => [...current, { date: sessions[0]?.date || "", time: "", session: "", track: "", responsible: "" }])}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <div className="session-edit-row" key={index}><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><input autoComplete="off" aria-label="Session date" type="date" value={item.date} onChange={(event) => updateSession(index, "date", event.target.value)} required /><input autoComplete="off" aria-label="Session time" placeholder="Start and end time" value={item.time} onChange={(event) => updateSession(index, "time", event.target.value)} required /><input autoComplete="off" aria-label="Session title" placeholder="Session title" value={item.session} onChange={(event) => updateSession(index, "session", event.target.value)} required /><select autoComplete="off" aria-label="Session track" required value={item.track} onChange={(event) => updateSession(index, "track", event.target.value)}><option value="" disabled>Select track</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><input autoComplete="off" aria-label="Responsible person" placeholder="Responsible" value={item.responsible} onChange={(event) => updateSession(index, "responsible", event.target.value)} /><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div></form></div></div>;
+  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map((item) => ({ ...item, ...sessionTimeRange(item), responsible: responsiblePeople(item.responsible).length ? responsiblePeople(item.responsible) : [emptyResponsiblePerson()] })) : [{ date: "", startTime: "", endTime: "", session: "", track: "", responsible: [emptyResponsiblePerson()] }]);
+  const updateSession = (index: number, updates: Partial<ProgramSession>) => setSessions((current) => current.map((session, i) => i === index ? { ...session, ...updates } : session));
+  const updateResponsible = (sessionIndex: number, personIndex: number, field: keyof ResponsiblePerson, value: string) => setSessions((current) => current.map((session, i) => {
+    if (i !== sessionIndex) return session;
+    const people = responsiblePeople(session.responsible);
+    return { ...session, responsible: people.map((person, j) => j === personIndex ? { ...person, [field]: value } : person) };
+  }));
+  const addSession = () => setSessions((current) => [...current, { date: current[0]?.date || "", startTime: "", endTime: "", session: "", track: "", responsible: [emptyResponsiblePerson()] }]);
+  const addResponsible = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: [...responsiblePeople(session.responsible), emptyResponsiblePerson()] } : session));
+  const removeResponsible = (sessionIndex: number, personIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: responsiblePeople(session.responsible).filter((_, j) => j !== personIndex) } : session));
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" defaultValue={initialProgram?.venue ?? ""} placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" defaultValue={initialProgram?.dateFrom ?? ""} onChange={(event) => { if (!sessions[0]?.date) updateSession(0, { date: event.target.value }); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" defaultValue={initialProgram?.dateTo ?? ""} required /></Field><Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, start and end time, and track.</p></div><button type="button" className="text-action" onClick={addSession}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}><div className="session-edit-main"><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><label className="session-edit-field session-edit-field--date"><span>Session date</span><input autoComplete="off" type="date" value={item.date} onChange={(event) => updateSession(index, { date: event.target.value })} required /></label><label className="session-edit-field session-edit-field--start"><span>Start time</span><input autoComplete="off" lang="en-US" type="time" aria-label="Start time (HH:MM AM/PM)" value={sessionTimeRange(item).startTime} onChange={(event) => updateSession(index, { startTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--end"><span>End time</span><input autoComplete="off" lang="en-US" type="time" aria-label="End time (HH:MM AM/PM)" value={sessionTimeRange(item).endTime} onChange={(event) => updateSession(index, { endTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label><label className="session-edit-field session-edit-field--track"><span>Track</span><select autoComplete="off" required value={item.track} onChange={(event) => updateSession(index, { track: event.target.value })}><option value="" disabled>Select track</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select></label><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div><div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>{responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}><input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} /><input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} /><input autoComplete="off" aria-label="Responsible office" placeholder="Office" value={person.office} onChange={(event) => updateResponsible(index, personIndex, "office", event.target.value)} /><button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button></div>)}</div></section>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div></form></div></div>;
 }
 
 function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: { programs: Program[]; initialMaterial: Material | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; busy: boolean }) {

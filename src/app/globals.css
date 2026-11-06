@@ -317,3 +317,42 @@ a { color: inherit; text-decoration: none; }
   .topbar, .hero, .program-section, .schedule-tools, .day-controls, .schedule-meta button, .schedule-footer, .materials-teaser, .footer, .cloud-notice { display: none !important; }
   .content-wrap { width: 100%; }.schedule-section { padding: 0; }.schedule-title-row { border: 0; }.schedule-table-wrap { overflow: visible; }.schedule-table { min-width: 0; }.schedule-table td { height: 42px; }
 }
+
+.program-editor { width: min(1040px, 100%); }
+.session-edit-list { max-height: min(42vh, 390px); overflow-x: hidden; }
+.session-edit-row { display: block; min-width: 0; padding: 13px; }
+.session-edit-main { display: grid; grid-template-columns: 25px minmax(120px, 1.1fr) minmax(112px, .9fr) minmax(112px, .9fr) minmax(175px, 1.5fr) minmax(125px, 1fr) 25px; align-items: end; gap: 8px; }
+.session-edit-num { align-self: center; padding-bottom: 9px; }
+.session-edit-field { display: grid; min-width: 0; gap: 4px; color: #7d8573; font-size: 10px; font-weight: 700; }
+.session-edit-row input, .session-edit-row select { height: 38px; border-radius: 8px; padding-inline: 9px; font-size: 12px; }
+.session-edit-main .remove-session { align-self: center; margin-bottom: 4px; }
+.session-edit-responsibles { margin: 12px 0 0 33px; padding-top: 10px; border-top: 1px solid #eef0e9; }
+.session-edit-responsibles-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; color: #7d8573; font-size: 10px; font-weight: 750; }
+.session-edit-responsibles-head .text-action { font-size: 10px; }
+.responsible-edit-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) 25px; gap: 8px; margin-top: 7px; }
+.session-person-list { display: grid; gap: 5px; }
+.session-person-list > span { display: grid; gap: 2px; }
+.session-person-list strong { color: #59614f; font-size: 11px; font-weight: 700; }
+.session-person-list small { color: #92998a; font-size: 10px; }
+@media (max-width: 760px) {
+  .program-editor { width: min(100%, 680px); }
+  .session-edit-main { grid-template-columns: 22px repeat(3, minmax(0, 1fr)) 24px; gap: 7px; }
+  .session-edit-field--date { grid-column: 2; }
+  .session-edit-field--start { grid-column: 3; }
+  .session-edit-field--end { grid-column: 4; }
+  .session-edit-field--title { grid-column: 2 / 4; }
+  .session-edit-field--track { grid-column: 4; }
+  .session-edit-main .remove-session { grid-column: 5; grid-row: 1; }
+  .session-edit-responsibles { margin-left: 29px; }
+}
+@media (max-width: 500px) {
+  .session-edit-main { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 24px; }
+  .session-edit-field--date { grid-column: 2 / 4; }
+  .session-edit-field--start { grid-column: 2; }
+  .session-edit-field--end { grid-column: 3; }
+  .session-edit-field--title, .session-edit-field--track { grid-column: 2 / 4; }
+  .session-edit-main .remove-session { grid-column: 4; grid-row: 1; }
+  .session-edit-responsibles { margin-left: 29px; }
+  .responsible-edit-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; gap: 6px; }
+  .responsible-edit-row input[aria-label="Responsible office"] { grid-column: 1 / 3; }
+}

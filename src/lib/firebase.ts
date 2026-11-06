@@ -36,7 +36,17 @@ export type UserProfile = {
   createdAt?: unknown;
 };
 
-export type ProgramSession = { date: string; time: string; session: string; track: string; responsible: string };
+export type ResponsiblePerson = { name: string; designation: string; office: string };
+export type ProgramSession = {
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  /** Legacy field retained so existing Firestore program documents remain readable. */
+  time?: string;
+  session: string;
+  track: string;
+  responsible: ResponsiblePerson[] | string;
+};
 export type Program = {
   id: string;
   eventTitle: string;

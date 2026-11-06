@@ -1,0 +1,18 @@
+@media (max-width: 760px) {
+  /* Keep the date and sex fields on separate rows so native mobile controls
+     cannot overflow into or overlap their neighboring field. */
+  .create-form .form-grid--three:has(input[name="birthdate"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .create-form .form-grid--three:has(input[name="birthdate"]) .field {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .create-form .form-grid--three:has(input[name="birthdate"]) .field-control > input,
+  .create-form .form-grid--three:has(input[name="birthdate"]) .field-control > select {
+    width: 100%;
+    min-width: 0;
+  }
+}

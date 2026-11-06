@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./auth-mobile.css";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://aew-congress.github.io";
 const currentYear = new Intl.DateTimeFormat("en-PH", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date());

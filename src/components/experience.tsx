@@ -232,6 +232,10 @@ export default function Experience() {
     const thisYearPrograms = programs.filter((program) => Number(program.dateFrom?.slice(0, 4)) === currentYear);
     return thisYearPrograms.find((program) => /aew congress/i.test(program.eventTitle)) ?? thisYearPrograms[0] ?? null;
   }, [currentYear, programs]);
+  useEffect(() => {
+    const programYear = Number(currentYearProgram?.dateFrom?.slice(0, 4));
+    document.title = `AEW Congress ${programYear || currentYear}`;
+  }, [currentYear, currentYearProgram]);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const days = useMemo(() => {
     if (!selectedProgram) return [];

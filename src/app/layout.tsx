@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://aew-congress.github.io";
-const shareTitle = "AEW Congress | Programs & Learning Materials";
+const currentYear = new Intl.DateTimeFormat("en-PH", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date());
+const shareTitle = `AEW Congress ${currentYear}`;
 const shareDescription = "AEW Congress recognizes, empowers, and supports agricultural and fishery extension workers and beyond.";
 
 export const metadata: Metadata = {

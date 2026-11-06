@@ -118,38 +118,6 @@ function responsibleSearchText(value: ProgramSession["responsible"]) {
   return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
 }
 
-function csvCell(value: string) {
-  const safeValue = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return `"${safeValue.replaceAll('"', '""')}"`;
-}
-
-function programScheduleCsv(program: Program, sessions: ProgramSession[], dayNumber: number) {
-  const rows = [["Event title", "Theme", "Venue", "Date", "Day", "Start time", "End time", "Session", "Track", "Responsible", "Designation", "Office"]];
-  for (const session of sessions) {
-    const people = session.responsibleNotApplicable
-      ? []
-      : session.allParticipants
-        ? [{ name: "All Participants", designation: "", office: "" }]
-        : responsiblePeople(session.responsible).filter((person) => person.name || person.designation || person.office);
-    const { startTime, endTime } = sessionTimeRange(session);
-    rows.push([
-      program.eventTitle,
-      program.theme ?? "",
-      program.venue,
-      session.date,
-      `Day ${String(dayNumber).padStart(2, "0")}`,
-      startTime ? formatTimeValue(startTime) : "",
-      endTime ? formatTimeValue(endTime) : "",
-      session.session,
-      session.track,
-      people.map((person) => person.name).join("; "),
-      people.map((person) => person.designation).join("; "),
-      people.map((person) => person.office).join("; "),
-    ]);
-  }
-  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
-}
-
 function saveDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -900,11 +868,7 @@ export default function Experience() {
                 {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{sessionTimeLabel(item)}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
-              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Download the displayed schedule as a CSV file" onClick={() => {
-                const programSlug = selectedProgram.eventTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "program";
-                const filename = `${programSlug}-day-${String(selectedDay + 1).padStart(2, "0")}-schedule.csv`;
-                saveDownload(new Blob([programScheduleCsv(selectedProgram, filteredSessions, selectedDay + 1)], { type: "text/csv;charset=utf-8" }), filename);
-              }}><Download size={15} /> Download schedule</button></div>
+              <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print or save the schedule" title="Open the print dialog to print or save as PDF" onClick={() => window.print()}><Download size={15} /> Download schedule</button></div>
             </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
 
             {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} onDownload={downloadMaterial} />}

@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isSuperadmin() {
+      return verified() && request.auth.token.email == 'rjamescute2@gmail.com';
+    }
+
+    function isApprovedMember() {
+      return verified()
+        && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.status == 'Approved';
+    }
+
+    match /userProfiles/{uid} {
+      allow get: if isSuperadmin() || (signedIn() && request.auth.uid == uid);
+      allow list: if isSuperadmin();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.keys().hasOnly([
+          'uid', 'firstName', 'middleName', 'lastName', 'suffix', 'birthdate',
+          'sexAtBirth', 'contactNo', 'position', 'designation', 'office',
+          'email', 'status', 'createdAt'
+        ]);
+      allow update: if isSuperadmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
+        && request.resource.data.status in ['Pending', 'Approved', 'Disapproved'];
+      allow delete: if isSuperadmin();
+    }
+
+    match /programs/{programId} {
+      allow read: if true;
+      allow create, update, delete: if isSuperadmin();
+    }
+
+    match /materials/{materialId} {
+      allow read: if isSuperadmin() || isApprovedMember();
+      allow create, update, delete: if isSuperadmin();
+    }
+
+    // Email documents are server-created and consumed by the Firebase Trigger Email extension.
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

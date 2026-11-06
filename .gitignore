@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+.firebase/
+functions/node_modules/
+functions/lib/
+functions/.env*
+*.log
+/sample.png
+/password.jpg

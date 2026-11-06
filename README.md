@@ -15,10 +15,10 @@ The program page shows an example event until the first real program is publishe
 
 ## Firebase setup
 
-1. In Firebase Authentication, enable the Email/Password provider and add `aew-caraga.github.io` to the authorized domains.
+1. In Firebase Authentication, enable the Email/Password provider and add the deployed website's hostname to the authorized domains (`aew-caraga.github.io` for the default GitHub Pages deployment). Email verification links return to the app, so the active hostname must be authorized as a continue URL.
 2. Create the Firestore database, then deploy `firestore.rules` with `firebase deploy --only firestore:rules`.
 3. Create the superadmin in Firebase Authentication using `rjamescute2@gmail.com`, set a fresh password in Firebase Console, and verify that email address. Superadmin access is granted only to that verified identity. Do not reuse a password shared in chat.
-4. Member registration sends a Firebase email verification link. Unverified profiles are excluded from the approval directory. After verifying, the member signs in once to move the profile into the Pending queue. Pending members see an approval notice at login; only verified and approved accounts can sign in to member features.
+4. Member registration sends a Firebase email verification link that returns to the app. After verification, the app syncs the profile into the Pending queue automatically while the registration session is active; no scheduled Cloud Function or Blaze plan is required. If the link is opened in another browser or device, return to the app in the browser where registration began.
 5. Deploy the UploadThing route on the Cloudflare Workers Free plan. From the repository root, run:
 
    ```bash

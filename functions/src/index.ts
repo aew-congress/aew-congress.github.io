@@ -3,7 +3,6 @@ import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import cors from "cors";
 import express from "express";
@@ -55,33 +54,4 @@ export const sendApprovalVerification = onDocumentUpdated("userProfiles/{uid}", 
     },
     createdAt: FieldValue.serverTimestamp(),
   });
-});
-
-/** Moves verified registrations into the superadmin approval queue without requiring another sign-in. */
-export const syncVerifiedRegistrations = onSchedule("every 1 minutes", async () => {
-  const firestore = getFirestore();
-  const unverifiedProfiles = await firestore.collection("userProfiles")
-    .where("status", "==", "Unverified")
-    .get();
-
-  for (let offset = 0; offset < unverifiedProfiles.docs.length; offset += 100) {
-    const profileBatch = unverifiedProfiles.docs.slice(offset, offset + 100);
-    const { users } = await getAuth().getUsers(profileBatch.map(({ id }) => ({ uid: id })));
-    const authUsersByUid = new Map(users.map((user) => [user.uid, user]));
-
-    await Promise.all(profileBatch.map(async (profileDocument) => {
-      const authUser = authUsersByUid.get(profileDocument.id);
-      const profileEmail = String(profileDocument.get("email") ?? "").trim().toLowerCase();
-      if (!authUser?.emailVerified || !authUser.email || profileEmail !== authUser.email.trim().toLowerCase()) return;
-
-      await firestore.runTransaction(async (transaction) => {
-        const latestProfile = await transaction.get(profileDocument.ref);
-        const latestData = latestProfile.data();
-        if (!latestProfile.exists || latestData?.status !== "Unverified") return;
-        if (String(latestData.email ?? "").trim().toLowerCase() !== authUser.email?.trim().toLowerCase()) return;
-
-        transaction.update(profileDocument.ref, { emailVerified: true, status: "Pending" });
-      });
-    }));
-  }
 });

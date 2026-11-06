@@ -150,7 +150,7 @@ a { color: inherit; text-decoration: none; }
 .schedule-table td { height: 55px; border-bottom: 1px solid #edf0e9; padding: 0 14px; }
 .schedule-table tbody tr:last-child td { border-bottom: 0; }
 .session-row { animation: row-in .35s both ease-out; }.session-row:hover { background: #fcfcf8; }
-.session-time { color: #838a7b; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.session-time { color: #838a7b; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: middle; }
 .session-name { color: #31372c; font-size: 14px; font-weight: 700; }
 .session-person { color: #71796a; font-size: 12px; }
 .track-pill { display: inline-flex; align-items: center; gap: 6px; color: #646c59; border-radius: 6px; padding: 5px 8px; background: #f3f4ef; font-size: 10px; font-weight: 700; white-space: nowrap; }

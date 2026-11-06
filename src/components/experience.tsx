@@ -127,6 +127,10 @@ function saveDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function emailVerificationActionSettings() {
+  return { url: window.location.origin, handleCodeInApp: false };
+}
+
 function materialFilename(material: Material) {
   const name = material.name.trim() || "program-material";
   if (/\.[a-z0-9]{1,8}$/i.test(name)) return name;
@@ -226,8 +230,36 @@ export default function Experience() {
       const responsibleSearch = item.allParticipants ? "All Participants" : item.responsibleNotApplicable ? "" : responsibleSearchText(item.responsible);
       const matchesSearch = !needle || `${item.session} ${responsibleSearch} ${item.track}`.toLowerCase().includes(needle);
       return matchesDay && matchesTrack && matchesSearch;
-    }).sort((a, b) => (sessionTimeRange(a).startTime || a.time || "").localeCompare(sessionTimeRange(b).startTime || b.time || ""));
+    }).sort((a, b) => {
+      const aTime = sessionTimeRange(a);
+      const bTime = sessionTimeRange(b);
+      return (aTime.startTime || a.time || "").localeCompare(bTime.startTime || b.time || "")
+        || aTime.endTime.localeCompare(bTime.endTime);
+    });
   }, [days, selectedDay, selectedProgram, search, trackFilter]);
+
+  const scheduleRows = useMemo(() => {
+    const rows: { item: ProgramSession; timeRowSpan: number }[] = [];
+    for (let index = 0; index < filteredSessions.length;) {
+      const item = filteredSessions[index];
+      const time = sessionTimeRange(item);
+      let groupEnd = index + 1;
+      if (time.startTime && time.endTime) {
+        while (groupEnd < filteredSessions.length) {
+          const candidate = filteredSessions[groupEnd];
+          const candidateTime = sessionTimeRange(candidate);
+          if (candidate.date !== item.date || candidateTime.startTime !== time.startTime || candidateTime.endTime !== time.endTime) break;
+          groupEnd += 1;
+        }
+      }
+      rows.push({ item, timeRowSpan: groupEnd - index });
+      for (let groupedIndex = index + 1; groupedIndex < groupEnd; groupedIndex += 1) {
+        rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0 });
+      }
+      index = groupEnd;
+    }
+    return rows;
+  }, [filteredSessions]);
 
   useEffect(() => {
     const stopPrograms = onSnapshot(query(collection(db, "programs"), orderBy("dateFrom", "asc")), (snapshot) => {
@@ -267,8 +299,8 @@ export default function Experience() {
           return;
         }
         if (!current.emailVerified) {
-          await signOut(auth);
           setActiveProfile(profile);
+          setToast({ kind: "info", text: "Verify your email to add your account to the superadmin approval queue." });
           return;
         }
         const verifiedProfile = {
@@ -292,6 +324,35 @@ export default function Experience() {
     });
     return () => { stopPrograms(); stopAuth(); };
   }, []);
+
+  useEffect(() => {
+    if (!user || user.emailVerified) return;
+    let checking = false;
+    const refreshIfVerified = async () => {
+      const current = auth.currentUser;
+      if (!current || checking) return;
+      checking = true;
+      try {
+        await current.reload();
+        if (!current.emailVerified) return;
+        await current.getIdToken(true);
+        window.location.reload();
+      } catch { /* A later focus or interval check will retry. */ }
+      finally { checking = false; }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshIfVerified();
+    };
+    const interval = window.setInterval(refreshIfVerified, 60_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+    void refreshIfVerified();
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!signedIn) { setMaterials([]); return; }
@@ -457,10 +518,9 @@ export default function Experience() {
         return;
       }
       if (!credential.user.emailVerified) {
-        await sendEmailVerification(credential.user);
-        await signOut(auth);
-        setActiveProfile(null);
-        setToast({ kind: "info", text: "Verify your email using the link we sent. Your account will then appear in the superadmin approval queue automatically." });
+        await sendEmailVerification(credential.user, emailVerificationActionSettings());
+        setActiveProfile(profile);
+        setToast({ kind: "info", text: "Verify your email using the link we sent. It will return you to the app and add your account to the superadmin approval queue." });
         setAuthOpen(false);
         return;
       }
@@ -532,12 +592,11 @@ export default function Experience() {
         createdAt: serverTimestamp(),
       };
       await (await import("firebase/firestore")).setDoc(doc(db, "userProfiles", credential.user.uid), profile);
-      await sendEmailVerification(credential.user);
-      await signOut(auth);
+      await sendEmailVerification(credential.user, emailVerificationActionSettings());
       formElement.reset();
       setAuthMode("login");
-      setAuthOpen(true);
-      setToast({ kind: "success", text: "Verification link has been sent to your email. Once verified, your account will appear in the superadmin approval queue automatically." });
+      setAuthOpen(false);
+      setToast({ kind: "success", text: "Verification link has been sent. Verify it in this browser to return to the app and add your account to the superadmin approval queue." });
     } catch (error) {
       if (auth.currentUser?.email?.toLowerCase() === email) await signOut(auth).catch(() => undefined);
       showError(error);
@@ -914,7 +973,7 @@ export default function Experience() {
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
-                {filteredSessions.map((item, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}><td className="session-time">{sessionTimeLabel(item)}</td><td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
+                {scheduleRows.map(({ item, timeRowSpan }, index) => <tr key={`${item.date}-${item.startTime ?? item.time}-${item.session}`} className="session-row" style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>)}
                 {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>

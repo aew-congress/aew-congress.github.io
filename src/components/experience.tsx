@@ -536,7 +536,7 @@ export default function Experience() {
     let name = String(form.get("materialName")).trim() || editingMaterial?.name || "";
     if (file instanceof File && file.size > 0) {
       if (!process.env.NEXT_PUBLIC_UPLOADTHING_URL) {
-        setToast({ kind: "error", text: "File uploads need the Firebase UploadThing endpoint set in the Pages build environment." });
+        setToast({ kind: "error", text: "File uploads aren't active yet. Upgrade Firebase to Blaze, deploy the UploadThing function, and configure its Pages endpoint." });
         return;
       }
       setUploadBusy(true);

@@ -1,18 +1,27 @@
 @media (max-width: 760px) {
-  /* Keep the date and sex fields on separate rows so native mobile controls
-     cannot overflow into or overlap their neighboring field. */
+  /* Keep Birthdate, Sex at birth, and Contact Number side by side while
+     allowing each control to shrink within its own grid column. */
   .create-form .form-grid--three:has(input[name="birthdate"]) {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .create-form .form-grid--three:has(input[name="birthdate"]) .field {
-    grid-column: 1 / -1;
+    grid-column: auto;
     min-width: 0;
   }
 
+  .create-form .form-grid--three:has(input[name="birthdate"]) .field-control,
   .create-form .form-grid--three:has(input[name="birthdate"]) .field-control > input,
-  .create-form .form-grid--three:has(input[name="birthdate"]) .field-control > select {
+  .create-form .form-grid--three:has(input[name="birthdate"]) .field-control > select,
+  .create-form .form-grid--three:has(input[name="birthdate"]) .phone-input {
     width: 100%;
     min-width: 0;
+    max-width: 100%;
+  }
+
+  .create-form .form-grid--three:has(input[name="birthdate"]) input[type="date"],
+  .create-form .form-grid--three:has(input[name="birthdate"]) select {
+    padding-inline: 3px;
+    font-size: 10px;
   }
 }

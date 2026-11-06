@@ -760,8 +760,8 @@ export default function Experience() {
               </div>
               <div className="hero-art" aria-hidden="true">
                 <div className="art-sun" />
-                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><Leaf size={25} /></div><span className="art-year">AEW CONGRESS</span></div>
-                <div className="art-card art-card--front"><div className="art-leaf"><Leaf size={25} /></div><span className="mini-label">CARAGA REGION XIII</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail">Shared knowledge for stronger communities</span></div>
+                <div className="art-card art-card--back"><span className="mini-label">LEARN / SHARE / GROW</span><div className="art-note-mark"><img src="/AEW_logo.png" alt="" /></div><span className="art-year">AEW CONGRESS</span></div>
+                <div className="art-card art-card--front"><div className="art-leaf"><img src="/AEW_logo.png" alt="" /></div><span className="mini-label">CARAGA REGION XIII</span><strong>Learn together.<br />Grow together.</strong><span className="art-line" /><span className="art-detail">Shared knowledge for stronger communities</span></div>
                 <div className="art-sticker"><Sparkles size={15} /><span>Curiosity<br />in action</span></div>
                 <span className="art-caption">LEARN / SHARE / GROW</span>
               </div>
@@ -852,7 +852,7 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
           <p className="auth-switch">Already registered? <button type="button" onClick={() => setMode("login")}>Log in</button></p>
         </form>}
       </div>
-      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CONGRESS<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><Leaf size={52} strokeWidth={1.2} /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
+      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CONGRESS<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><img src="/AEW_logo.png" alt="AEW Congress" /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
     </div>
   </div>;
 }

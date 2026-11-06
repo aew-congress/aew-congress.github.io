@@ -17,7 +17,7 @@ import {
 import { auth, db, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
 import { uploadFiles } from "@/lib/uploadthing";
 
-type Section = "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
+type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage";
 type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Opening" | "Plenary";
 const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting", "Opening", "Plenary"];
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
@@ -82,7 +82,7 @@ export default function Experience() {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
-  const [section, setSection] = useState<Section>("programs");
+  const [section, setSection] = useState<Section>("home");
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const [selectedDay, setSelectedDay] = useState(0);
   const [trackFilter, setTrackFilter] = useState<string>("All tracks");
@@ -606,7 +606,7 @@ export default function Experience() {
 
   async function logout() {
     await signOut(auth);
-    setSection("programs");
+    setSection("home");
     setToast({ kind: "success", text: "You have signed out." });
   }
 
@@ -622,12 +622,12 @@ export default function Experience() {
   return (
     <div className="site-shell">
       <header className="topbar">
-        <a href="#top" className="brand" aria-label="AEW Caraga home">
+        <a href="#top" className="brand" aria-label="AEW Caraga home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
           <span className="brand-mark"><img src="/AEW_logo.png" alt="" /></span>
           <span className="brand-wording"><strong>AEW <em>CARAGA</em></strong><small>PROGRAMS & MATERIALS</small></span>
         </a>
         <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
+          {navItems.map((item) => <button key={item.id} className={section === item.id || (section === "home" && item.id === "programs") ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.status === "Pending").length}</span>}</button>)}
         </nav>
         <div className="topbar-actions">
           {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isAdmin ? "Superadmin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
@@ -648,12 +648,12 @@ export default function Experience() {
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} loading={loading} />
         ) : (
           <>
-            <section className="hero content-wrap">
+            {section === "home" && <section className="hero content-wrap">
               <div className="hero-copy">
                 <span className="eyebrow"><span className="eyebrow-dot" />A shared space for learning</span>
                 <h1>Good programs<br /><span>make room</span> for <i>growth.</i></h1>
                 <p>Explore published learning sessions, follow the daily flow, and find resources shared by the community.</p>
-                <div className="hero-actions"><button className="button button--olive" onClick={() => document.getElementById("program-list")?.scrollIntoView({ behavior: "smooth" })}>Explore programs <ArrowDownRight size={17} /></button><button className="text-action" onClick={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }}>{signedIn ? "Browse materials" : "Member access"} <ArrowRight size={16} /></button></div>
+                <div className="hero-actions"><button className="button button--olive" onClick={() => setSection("programs")}>Explore programs <ArrowDownRight size={17} /></button><button className="text-action" onClick={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }}>{signedIn ? "Browse materials" : "Member access"} <ArrowRight size={16} /></button></div>
                 <div className="hero-note"><Leaf size={17} /><span>For agricultural extension workers<br /><strong>across the Caraga Region.</strong></span></div>
               </div>
               <div className="hero-art" aria-hidden="true">
@@ -664,8 +664,9 @@ export default function Experience() {
                 <span className="art-caption">LEARN / SHARE / GROW</span>
               </div>
               <div className="hero-bottomline"><span>REGIONAL KNOWLEDGE, SHARED LOCALLY</span><span>AEW CARAGA / REGION XIII</span></div>
-            </section>
+            </section>}
 
+            {section === "programs" && <>
             <section className="content-wrap program-section" id="program-list">
               <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>PROGRAMS</span></span>{isAdmin && <button className="button button--soft" onClick={() => openProgramEditor()}><Plus size={16} /> New program</button>}</div></div>
               <div className="program-cards">
@@ -689,11 +690,12 @@ export default function Experience() {
 
             {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} />}
             {cloudIssue && <div className="content-wrap cloud-notice"><CircleHelp size={16} /><span>Live data isn’t connected yet. {cloudIssue === "Missing or insufficient permissions." ? "Add the provided Firestore rules and enable sign-in in Firebase." : cloudIssue}</span></div>}
+            </>}
           </>
         )}
       </main>
 
-      <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Caraga" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Caraga <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>
+      {section !== "home" && <footer className="footer content-wrap"><a href="#top" className="footer-brand"><img src="/AEW_logo.png" alt="AEW Caraga" /><span>Learning travels<br /><strong>further together.</strong></span></a><span className="footer-copy">© {new Date().getFullYear()} AEW Caraga <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
 
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}

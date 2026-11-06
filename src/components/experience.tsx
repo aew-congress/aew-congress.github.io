@@ -11,7 +11,7 @@ import {
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
-  EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, MapPin,
+  EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Plus, Search, ShieldCheck, Sparkles, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { auth, db, Material, MaterialCategory, Program, ProgramSession, SUPERADMIN_EMAIL, UserProfile } from "@/lib/firebase";
@@ -108,7 +108,7 @@ export default function Experience() {
   const [trackFilter, setTrackFilter] = useState<string>("All tracks");
   const [search, setSearch] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<"login" | "create">("login");
+  const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [programModal, setProgramModal] = useState(false);
@@ -294,13 +294,19 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
-  async function handleForgotPassword() {
-    const email = window.prompt("Enter the email address on your account:");
-    if (!email) return;
+  async function handleForgotPassword(email: string) {
+    if (!email.trim()) { setToast({ kind: "error", text: "Enter the email address on your account." }); return; }
     try {
       await sendPasswordResetEmail(auth, email.trim());
+      setAuthOpen(false);
       setToast({ kind: "success", text: "If an account exists for that address, a password reset link is on its way." });
-    } catch (error) { showError(error); }
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (code === "auth/user-not-found" || code === "auth/invalid-email") {
+        setAuthOpen(false);
+        setToast({ kind: "success", text: "If an account exists for that address, a password reset link is on its way." });
+      } else showError(error);
+    }
   }
 
   async function changeStatus(profile: UserProfile, status: UserProfile["status"]) {
@@ -472,29 +478,35 @@ export default function Experience() {
 }
 
 function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
-  mode: "login" | "create"; setMode: (value: "login" | "create") => void; onClose: () => void;
-  onLogin: (event: FormEvent<HTMLFormElement>) => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; onForgot: () => void;
+  mode: "login" | "create" | "reset"; setMode: (value: "login" | "create" | "reset") => void; onClose: () => void;
+  onLogin: (event: FormEvent<HTMLFormElement>) => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; onForgot: (email: string) => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const score = passwordScore(password);
   const labels = ["Very weak", "Weak", "So-so", "Good", "Great!"];
   const today = new Date().toISOString().slice(0, 10);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className={`auth-modal ${mode === "create" ? "auth-modal--flipped" : ""}`} role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : "Log in"}>
+    <div className={`auth-modal ${mode === "create" ? "auth-modal--flipped" : mode === "reset" ? "auth-modal--reset" : ""}`} role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
       <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
       <div className="auth-side auth-side--form">
         <div className="auth-mobile-brand"><img src="/AEW_logo.png" alt="AEW" /><span>AEW <strong>CARAGA</strong></span></div>
-        <div className="auth-heading"><span className="eyebrow">{mode === "create" ? "JOIN THE COMMUNITY" : "WELCOME BACK"}</span><h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : "Sign in to access your programs and shared materials."}</p></div>
+        <div className="auth-heading"><span className="eyebrow">{mode === "create" ? "JOIN THE COMMUNITY" : mode === "reset" ? "ACCOUNT RECOVERY" : "WELCOME BACK"}</span><h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : mode === "reset" ? <>Reset your<br />password<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : mode === "reset" ? "We’ll send a secure reset link to the email on your account." : "Sign in to access your programs and shared materials."}</p></div>
         {mode === "login" ? <form className="auth-form login-form" onSubmit={onLogin}>
-          <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" placeholder="you@office.gov.ph" required /></Field>
+          <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
           <Field label="Password" icon={<LockKeyhole size={15} />}><input type={showPassword ? "text" : "password"} name="password" autoComplete="current-password" placeholder="Enter your password" required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></Field>
-          <div className="auth-form-row"><span className="secure-note"><ShieldCheck size={13} /> Protected access</span><button type="button" className="forgot-link" onClick={onForgot}>Forgot password?</button></div>
+          <div className="auth-form-row"><span className="secure-note"><ShieldCheck size={13} /> Protected access</span><button type="button" className="forgot-link" onClick={() => setMode("reset")}>Forgot password?</button></div>
           <button className="button button--olive button--wide" type="submit">Log in <ArrowRight size={16} /></button>
           <p className="auth-switch">New to AEW Caraga? <button type="button" onClick={() => setMode("create")}>Create an account</button></p>
+        </form> : mode === "reset" ? <form className="auth-form login-form reset-form" onSubmit={(event) => { event.preventDefault(); onForgot(email); }}>
+          <Field label="Email address" icon={<Mail size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
+          <div className="reset-note"><LockKeyhole size={15} /><span>For your privacy, we’ll show the same confirmation whether or not an account exists.</span></div>
+          <button className="button button--olive button--wide" type="submit">Send reset link <ArrowRight size={16} /></button>
+          <p className="auth-switch">Remembered your password? <button type="button" onClick={() => setMode("login")}>Back to log in</button></p>
         </form> : <form className="auth-form create-form" onSubmit={onCreate}>
           <div className="form-section-label">PERSONAL DETAILS <span>01 / 02</span></div>
           <div className="form-grid form-grid--four"><Field label="First name"><input name="firstName" autoComplete="given-name" placeholder="First name" required /></Field><Field label="Middle name"><input name="middleName" autoComplete="additional-name" placeholder="Middle name" /></Field><Field label="Last name"><input name="lastName" autoComplete="family-name" placeholder="Last name" required /></Field><Field label="Suffix"><select name="suffix"><option value="">—</option>{suffixes.map((suffix) => <option key={suffix}>{suffix}</option>)}</select></Field></div>

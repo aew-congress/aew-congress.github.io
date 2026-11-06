@@ -4,6 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AEW Caraga | Programs & Learning Materials",
   description: "Programs, daily session flows, and learning materials for AEW Caraga.",
+  icons: {
+    icon: "/AEW_logo.png",
+    shortcut: "/AEW_logo.png",
+    apple: "/AEW_logo.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

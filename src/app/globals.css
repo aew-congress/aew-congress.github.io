@@ -335,7 +335,12 @@ a { color: inherit; text-decoration: none; }
 .session-edit-responsibles { margin: 12px 0 0 33px; padding-top: 10px; border-top: 1px solid #eef0e9; }
 .session-edit-responsibles-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; color: #7d8573; font-size: 10px; font-weight: 750; }
 .session-edit-responsibles-head .text-action { font-size: 10px; }
-.responsible-edit-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) 25px; gap: 8px; margin-top: 7px; }
+.responsible-edit-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) auto 25px; align-items: center; gap: 8px; margin-top: 7px; }
+.responsible-edit-row input:disabled { background: #f1f2ed; color: #9ca291; cursor: not-allowed; }
+.all-participants-slot { display: flex; align-items: center; justify-content: flex-end; }
+.all-participants-toggle { display: inline-flex; align-items: center; gap: 5px; color: #59614f; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.all-participants-toggle input { width: 14px; height: 14px !important; margin: 0; padding: 0 !important; accent-color: #4d681b; cursor: pointer; }
+.all-participants-value { color: #4d681b; font-size: 11px; font-weight: 750; }
 .session-person-list { display: grid; gap: 5px; }
 .session-person-list > span { display: grid; gap: 2px; }
 .session-person-list strong { color: #59614f; font-size: 11px; font-weight: 700; }
@@ -360,5 +365,10 @@ a { color: inherit; text-decoration: none; }
   .session-edit-main .remove-session { grid-column: 4; grid-row: 1; }
   .session-edit-responsibles { margin-left: 29px; }
   .responsible-edit-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; gap: 6px; }
-  .responsible-edit-row input[aria-label="Responsible office"] { grid-column: 1 / 3; }
+  .responsible-edit-row input[aria-label="Responsible name"] { grid-column: 1 / 3; grid-row: 1; }
+  .responsible-edit-row input[aria-label="Responsible designation"] { grid-column: 1; grid-row: 2; }
+  .responsible-edit-row input[aria-label="Responsible office"] { grid-column: 2; grid-row: 2; }
+  .responsible-edit-row .all-participants-slot { grid-column: 1 / 3; grid-row: 3; }
+  .responsible-edit-row .all-participants-slot:empty { display: none; }
+  .responsible-edit-row .remove-session { grid-column: 3; grid-row: 1; }
 }

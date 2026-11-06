@@ -48,6 +48,7 @@ export type ProgramSession = {
   time?: string;
   session: string;
   track: string;
+  allParticipants?: boolean;
   responsible: ResponsiblePerson[] | string;
 };
 export type Program = {

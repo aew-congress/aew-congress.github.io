@@ -21,7 +21,7 @@ import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
-const START_ACCESS_CODE = "AEW2026";
+const START_ACCESS_CODE = "aew2026";
 const GUEST_ACCESS_STORAGE_KEY = "aew-congress-guest-access";
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];

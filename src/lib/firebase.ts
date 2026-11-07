@@ -107,6 +107,8 @@ export type Material = {
   programId: string;
   programTitle: string;
   category: MaterialCategory;
+  /** Optional topic tag for presentation materials. */
+  topic?: string;
   name: string;
   url: string;
   enabled?: boolean;

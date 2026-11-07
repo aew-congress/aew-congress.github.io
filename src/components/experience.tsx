@@ -975,6 +975,7 @@ export default function Experience() {
     const file = form.get("materialFile");
     const externalUrl = String(form.get("materialUrl")).trim();
     const category = String(form.get("category")) as MaterialCategory;
+    const topic = category === "Presentation" ? String(form.get("topic") ?? "").trim() : "";
     let url = externalUrl || editingMaterial?.url || "";
     let name = String(form.get("materialName")).trim() || editingMaterial?.name || "";
     if (file instanceof File && file.size > 0) {
@@ -995,6 +996,7 @@ export default function Experience() {
         programId: targetProgram.id,
         programTitle: targetProgram.eventTitle,
         category,
+        topic,
         name: name || url.split("/").pop() || "Program resource",
         url,
         enabled: editingMaterial ? editingMaterial.enabled !== false : false,
@@ -2025,6 +2027,9 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
   const [selectedFileName, setSelectedFileName] = useState("");
   const [resourceUrl, setResourceUrl] = useState(initialMaterial?.url ?? "");
   const [resourceError, setResourceError] = useState("");
+  const [category, setCategory] = useState<MaterialCategory>(initialMaterial?.category ?? "Guidelines");
+  const [topic, setTopic] = useState(initialMaterial?.topic ?? "");
+  const savedTopics = useMemo(() => Array.from(new Set(programs.flatMap((program) => program.keynoteTopics?.map((item) => item.topic.trim()).filter(Boolean) ?? []))).sort((a, b) => a.localeCompare(b)), [programs]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2037,9 +2042,30 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
     onCreate(event);
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}><div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={handleSubmit}><Field label="Program"><select name="programId" required defaultValue={initialMaterial?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field><Field label="Category"><select name="category" defaultValue={initialMaterial?.category ?? "Guidelines"}>{categories.map((category) => <option key={category}>{category}</option>)}</select></Field><Field label="Material name"><input name="materialName" defaultValue={initialMaterial?.name ?? ""} placeholder="e.g. Participant guide" /></Field><label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedFileName || "Choose a file"}</strong><small>{selectedFileName ? "Selected for upload" : "PDF, presentation, worksheet, or document · up to 16 MB"}</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" onChange={(event) => { setSelectedFileName(event.target.files?.[0]?.name ?? ""); setResourceError(""); }} /></span></label><div className="or-divider"><span>OR ADD A LINK</span></div><Field label="Resource URL"><input type="url" name="materialUrl" value={resourceUrl} onChange={(event) => { setResourceUrl(event.target.value); setResourceError(""); }} placeholder="https://…" /></Field><p className="form-hint">Add either a resource URL or an uploaded file. You can leave the other option empty.</p>{resourceError && <p className="material-form-error" role="alert">{resourceError}</p>}<p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialMaterial ? "Save changes" : "Add material"}<ArrowRight size={16} /></button></div>{programs.length === 0 && <p className="form-hint">Publish a program before adding its materials.</p>}</form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}>
+      <div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <form onSubmit={handleSubmit}>
+        <Field label="Program"><select name="programId" required defaultValue={initialMaterial?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+        <Field label="Category"><select name="category" value={category} onChange={(event) => setCategory(event.target.value as MaterialCategory)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></Field>
+        {category === "Presentation" && <Field label="Topic"><select name="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
+          <option value="">{savedTopics.length ? "Select a saved topic" : "No saved topics available"}</option>
+          {topic && !savedTopics.includes(topic) && <option value={topic}>{topic}</option>}
+          {savedTopics.map((savedTopic) => <option key={savedTopic} value={savedTopic}>{savedTopic}</option>)}
+        </select></Field>}
+        <Field label="Material name"><input name="materialName" defaultValue={initialMaterial?.name ?? ""} placeholder="e.g. Participant guide" /></Field>
+        <label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedFileName || "Choose a file"}</strong><small>{selectedFileName ? "Selected for upload" : "PDF, presentation, worksheet, or document · up to 16 MB"}</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" onChange={(event) => { setSelectedFileName(event.target.files?.[0]?.name ?? ""); setResourceError(""); }} /></span></label>
+        <div className="or-divider"><span>OR ADD A LINK</span></div>
+        <Field label="Resource URL"><input type="url" name="materialUrl" value={resourceUrl} onChange={(event) => { setResourceUrl(event.target.value); setResourceError(""); }} placeholder="https://…" /></Field>
+        <p className="form-hint">Add either a resource URL or an uploaded file. You can leave the other option empty.</p>
+        {resourceError && <p className="material-form-error" role="alert">{resourceError}</p>}
+        <p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p>
+        <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialMaterial ? "Save changes" : "Add material"}<ArrowRight size={16} /></button></div>
+        {programs.length === 0 && <p className="form-hint">Publish a program before adding its materials.</p>}
+      </form>
+    </div>
+  </div>;
 }
-
 function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
   programs: Program[];
   initialSpeaker: SpeakerProfileCard | null;

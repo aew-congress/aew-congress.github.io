@@ -25,9 +25,9 @@ export const uploadRouter = {
 
       if (!decoded.email_verified) throw new UploadThingError("Verify your email address before uploading.");
       const profile = await getFirestore().doc(`userProfiles/${decoded.uid}`).get();
-      const isSuperadmin = decoded.email?.toLowerCase() === SUPERADMIN_EMAIL
-        || (profile.exists && profile.data()?.role === "superadmin");
-      if (!isSuperadmin && (!profile.exists || profile.data()?.status !== "Approved")) {
+      const isAdmin = decoded.email?.toLowerCase() === SUPERADMIN_EMAIL
+        || (profile.exists && ["admin", "superadmin"].includes(String(profile.data()?.role)));
+      if (!isAdmin && (!profile.exists || profile.data()?.status !== "Approved")) {
         throw new UploadThingError("Only approved members can upload materials.");
       }
 

@@ -18,7 +18,7 @@ export const db = getFirestore(firebaseApp);
 export const SUPERADMIN_EMAIL = (process.env.NEXT_PUBLIC_SUPERADMIN_EMAIL || "rjamescute2@gmail.com").toLowerCase();
 
 export type AccountStatus = "Unverified" | "Pending" | "Approved" | "Disapproved";
-export type UserRole = "superadmin" | "regular";
+export type UserRole = "superadmin" | "admin" | "regular";
 
 export type UserProfile = {
   uid: string;
@@ -49,7 +49,6 @@ export type ProgramSession = {
   /** Legacy field retained so existing Firestore program documents remain readable. */
   time?: string;
   session: string;
-  track: string;
   allParticipants?: boolean;
   responsibleNotApplicable?: boolean;
   responsible: ResponsiblePerson[] | string;

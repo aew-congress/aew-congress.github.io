@@ -18,16 +18,9 @@ import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Materi
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage" | "confirmedAttendees";
-type Track = "Break" | "Breakout" | "Closing" | "Logistics" | "Meeting" | "Opening" | "Plenary";
-const tracks: Track[] = ["Break", "Breakout", "Closing", "Logistics", "Meeting", "Opening", "Plenary"];
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics"; id: string; label: string };
-
-const trackColors: Record<string, string> = {
-  Break: "track-break", Breakout: "track-breakout", Closing: "track-closing",
-  Logistics: "track-logistics", Meeting: "track-meeting", Opening: "track-opening", Plenary: "track-plenary",
-};
 
 function displayDate(date: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }) {
   if (!date) return "Date to be announced";
@@ -136,6 +129,18 @@ function responsiblePeople(value: ProgramSession["responsible"]): ResponsiblePer
   return typeof value === "string" && value.trim() ? [{ name: value.trim(), designation: "", office: "" }] : [];
 }
 
+function normalizeProgramSession(item: ProgramSession): ProgramSession {
+  const responsible = responsiblePeople(item.responsible);
+  return {
+    date: item.date,
+    ...sessionTimeRange(item),
+    session: item.session,
+    allParticipants: Boolean(item.allParticipants),
+    responsibleNotApplicable: Boolean(item.responsibleNotApplicable),
+    responsible: responsible.length ? responsible : [emptyResponsiblePerson()],
+  };
+}
+
 function responsibleSearchText(value: ProgramSession["responsible"]) {
   return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
 }
@@ -216,7 +221,6 @@ export default function Experience() {
   const [section, setSection] = useState<Section>("home");
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const [selectedDay, setSelectedDay] = useState(0);
-  const [trackFilter, setTrackFilter] = useState<string>("All tracks");
   const [search, setSearch] = useState("");
   const [hoveredTimeGroup, setHoveredTimeGroup] = useState<number | null>(null);
   const [expandedSessionPeriods, setExpandedSessionPeriods] = useState<Set<string>>(() => new Set());
@@ -243,7 +247,8 @@ export default function Experience() {
   const [loading, setLoading] = useState(true);
   const authActionInProgress = useRef(false);
 
-  const isAdmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
+  const isSuperadmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
+  const isAdmin = isSuperadmin || Boolean(user && user.emailVerified && profileRole(activeProfile ?? {}) === "admin");
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
   const signedIn = isAdmin || isApprovedMember;
@@ -293,18 +298,17 @@ export default function Experience() {
     const selectedDate = days[selectedDay];
     return selectedProgram.flow.filter((item) => {
       const matchesDay = item.date === selectedDate;
-      const matchesTrack = trackFilter === "All tracks" || item.track === trackFilter;
       const needle = search.trim().toLowerCase();
       const responsibleSearch = item.allParticipants ? "All Participants" : item.responsibleNotApplicable ? "" : responsibleSearchText(item.responsible);
-      const matchesSearch = !needle || `${item.session} ${responsibleSearch} ${item.track}`.toLowerCase().includes(needle);
-      return matchesDay && matchesTrack && matchesSearch;
+      const matchesSearch = !needle || `${item.session} ${responsibleSearch}`.toLowerCase().includes(needle);
+      return matchesDay && matchesSearch;
     }).sort((a, b) => {
       const aTime = sessionTimeRange(a);
       const bTime = sessionTimeRange(b);
       return (aTime.startTime || a.time || "").localeCompare(bTime.startTime || b.time || "")
         || aTime.endTime.localeCompare(bTime.endTime);
     });
-  }, [days, selectedDay, selectedProgram, search, trackFilter]);
+  }, [days, selectedDay, selectedProgram, search]);
 
   const scheduleRows = useMemo(() => {
     const rows: { item: ProgramSession; timeRowSpan: number; timeGroup: number; period: string; periodLabel: string }[] = [];
@@ -363,10 +367,10 @@ export default function Experience() {
         const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
         if (!profileSnapshot.exists()) { await signOut(auth); return; }
         const profile = profileSnapshot.data() as UserProfile;
-        if (profileRole(profile) === "superadmin") {
+        if (profileRole(profile) === "superadmin" || profileRole(profile) === "admin") {
           if (!current.emailVerified) {
             await signOut(auth);
-            setToast({ kind: "info", text: "Verify your email address before using superadmin tools." });
+            setToast({ kind: "info", text: "Verify your email address before using admin tools." });
             return;
           }
           setActiveProfile(profile);
@@ -479,14 +483,36 @@ export default function Experience() {
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!isAdmin) { setProfiles([]); setProfilesLoading(false); return; }
+    if (!isSuperadmin) { setProfiles([]); setProfilesLoading(false); return; }
     setProfilesLoading(true);
     const stopProfiles = onSnapshot(query(collection(db, "userProfiles"), orderBy("createdAt", "desc")), (snapshot) => {
       setProfiles(snapshot.docs.map((entry) => entry.data() as UserProfile));
       setProfilesLoading(false);
     }, (error) => { setCloudIssue(errorText(error)); setProfilesLoading(false); });
     return stopProfiles;
-  }, [isAdmin]);
+  }, [isSuperadmin]);
+
+  useEffect(() => {
+    if (!isAdmin || isSuperadmin) return;
+    let cancelled = false;
+    const profileIds = Array.from(new Set([
+      ...contestJoins.map((join) => join.uid),
+      ...attendanceConfirmations.map((confirmation) => confirmation.uid),
+    ].filter(Boolean)));
+    if (!profileIds.length) {
+      setProfiles([]);
+      setProfilesLoading(false);
+      return;
+    }
+    setProfilesLoading(true);
+    Promise.all(profileIds.map((uid) => getDoc(doc(db, "userProfiles", uid))))
+      .then((snapshots) => {
+        if (!cancelled) setProfiles(snapshots.filter((snapshot) => snapshot.exists()).map((snapshot) => snapshot.data() as UserProfile));
+      })
+      .catch((error) => { if (!cancelled) setCloudIssue(errorText(error)); })
+      .finally(() => { if (!cancelled) setProfilesLoading(false); });
+    return () => { cancelled = true; };
+  }, [isAdmin, isSuperadmin, contestJoins, attendanceConfirmations]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -566,9 +592,9 @@ export default function Experience() {
   function openMaterialEditor(material: Material | null = null) { setEditingMaterial(material); setMaterialModal(true); }
   function openMechanicsEditor(mechanics: ContestMechanics | null = null) { setEditingMechanics(mechanics); setContestMechanicsModal(true); }
 
-  async function getVerifiedSuperadmin() {
+  async function getVerifiedAdmin() {
     const current = auth.currentUser;
-    if (!current) throw new Error("Sign in with a verified superadmin account to make this change.");
+    if (!current) throw new Error("Sign in with a verified admin account to make this change.");
     await current.reload();
     const token = await current.getIdTokenResult(true);
     const tokenEmail = String(token.claims.email ?? current.email ?? "").trim().toLowerCase();
@@ -577,8 +603,9 @@ export default function Experience() {
     }
     if (tokenEmail !== SUPERADMIN_EMAIL) {
       const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
-      if (!profileSnapshot.exists() || profileRole(profileSnapshot.data() as UserProfile) !== "superadmin") {
-        throw new Error("Only a verified superadmin can make this change.");
+      const role = profileSnapshot.exists() ? profileRole(profileSnapshot.data() as UserProfile) : "regular";
+      if (role !== "superadmin" && role !== "admin") {
+        throw new Error("Only a verified admin can make this change.");
       }
     }
     return current;
@@ -615,11 +642,11 @@ export default function Experience() {
         throw new Error("We couldn't find a registration for this account. Please create an account first.");
       }
       const profile = profileSnapshot.data() as UserProfile;
-      if (profileRole(profile) === "superadmin") {
+      if (profileRole(profile) === "superadmin" || profileRole(profile) === "admin") {
         if (!credential.user.emailVerified) {
           await sendEmailVerification(credential.user);
           await signOut(auth);
-          setToast({ kind: "info", text: "Verify your email address before using superadmin tools." });
+          setToast({ kind: "info", text: "Verify your email address before using admin tools." });
           setAuthOpen(false);
           return;
         }
@@ -732,6 +759,7 @@ export default function Experience() {
   }
 
   async function changeStatus(profile: UserProfile, status: UserProfile["status"]) {
+    if (!isSuperadmin) { setToast({ kind: "error", text: "Only a superadmin can manage user approval." }); return; }
     try {
       await updateDoc(doc(db, "userProfiles", profile.uid), { status, reviewedAt: serverTimestamp() });
       setToast({ kind: "success", text: `${fullName(profile)} marked ${status.toLowerCase()}.` });
@@ -739,6 +767,7 @@ export default function Experience() {
   }
 
   async function changeRole(profile: UserProfile, role: UserRole) {
+    if (!isSuperadmin) { setToast({ kind: "error", text: "Only a superadmin can manage account roles." }); return; }
     if (profile.email.toLowerCase() === SUPERADMIN_EMAIL && role !== "superadmin") {
       setToast({ kind: "error", text: "The primary superadmin role cannot be removed." });
       return;
@@ -754,15 +783,11 @@ export default function Experience() {
     event.preventDefault();
     if (!user || !isAdmin) {
       setProgramModal(false);
-      setToast({ kind: "error", text: "Sign in with a verified superadmin account to publish programs." });
+      setToast({ kind: "error", text: "Sign in with a verified admin account to publish programs." });
       return;
     }
     const form = new FormData(event.currentTarget);
-    const flow = (JSON.parse(String(form.get("flowJson"))) as ProgramSession[]).map((item) => {
-      const normalized = { ...item };
-      delete normalized.time;
-      return { ...normalized, ...sessionTimeRange(item), responsible: responsiblePeople(item.responsible) };
-    });
+    const flow = (JSON.parse(String(form.get("flowJson"))) as ProgramSession[]).map(normalizeProgramSession);
     const payload = {
       eventTitle: String(form.get("eventTitle")).trim(),
       theme: String(form.get("theme") ?? "").trim(),
@@ -775,7 +800,7 @@ export default function Experience() {
     };
     if (payload.dateTo < payload.dateFrom) { setToast({ kind: "error", text: "The end date must be on or after the start date." }); return; }
     try {
-      const adminUser = await getVerifiedSuperadmin();
+      const adminUser = await getVerifiedAdmin();
       if (editingProgram) {
         const [materialSnapshot, mechanicsSnapshot] = await Promise.all([
           getDocs(query(collection(db, "materials"), where("programId", "==", editingProgram.id))),
@@ -807,7 +832,7 @@ export default function Experience() {
         const token = current ? await current.getIdTokenResult() : null;
         const actualEmail = String(token?.claims.email ?? current?.email ?? "no signed-in account");
         const verified = token?.claims.email_verified === true;
-        setToast({ kind: "error", text: `Firestore rejected this program write for ${actualEmail} (verified email: ${verified ? "yes" : "no"}). The required superadmin is ${SUPERADMIN_EMAIL}.` });
+        setToast({ kind: "error", text: `Firestore rejected this program write for ${actualEmail} (verified email: ${verified ? "yes" : "no"}). Check that this account has admin access.` });
         return;
       }
       showError(error);
@@ -820,7 +845,7 @@ export default function Experience() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     let adminUser: User;
-    try { adminUser = await getVerifiedSuperadmin(); }
+    try { adminUser = await getVerifiedAdmin(); }
     catch (error) { showError(error); return; }
     const targetProgram = programs.find((program) => program.id === String(form.get("programId")));
     if (!targetProgram) { setToast({ kind: "error", text: "Choose a published program for this material." }); return; }
@@ -867,7 +892,7 @@ export default function Experience() {
     event.preventDefault();
     if (!user || !isAdmin) {
       setContestMechanicsModal(false);
-      setToast({ kind: "error", text: "Sign in with a verified superadmin account to add contest mechanics." });
+      setToast({ kind: "error", text: "Sign in with a verified admin account to add contest mechanics." });
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -891,7 +916,7 @@ export default function Experience() {
     }
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
     try {
-      const adminUser = await getVerifiedSuperadmin();
+      const adminUser = await getVerifiedAdmin();
       if (editingMechanics) {
         const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
         const updates = [
@@ -973,7 +998,7 @@ export default function Experience() {
     if (!isAdmin || join.status === "Qualified Contestant") return;
     setConfirmingJoinId(join.id);
     try {
-      await getVerifiedSuperadmin();
+      await getVerifiedAdmin();
       await updateDoc(doc(db, "contestJoins", join.id), { status: "Qualified Contestant" });
       setContestJoins((current) => current.map((item) => item.id === join.id ? { ...item, status: "Qualified Contestant" } : item));
       setToast({ kind: "success", text: `Contestant confirmed as qualified for ${join.contest}.` });
@@ -988,7 +1013,7 @@ export default function Experience() {
     if (!deleteTarget) return;
     setDeleteBusy(true);
     try {
-      await getVerifiedSuperadmin();
+      await getVerifiedAdmin();
       let refs: Array<{ collectionName: string; id: string }> = [];
       if (deleteTarget.kind === "program") {
         const [materialDocs, mechanicsDocs, joinDocs] = await Promise.all([
@@ -1043,7 +1068,7 @@ export default function Experience() {
     ...(signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage content" }] : []),
     ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
-    ...(isAdmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
+    ...(isSuperadmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
   ];
 
   return (
@@ -1065,16 +1090,16 @@ export default function Experience() {
           {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}
         </nav>}
         <div className="topbar-actions">
-          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isAdmin ? "Superadmin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
+          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isSuperadmin ? "Superadmin" : isAdmin ? "Admin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
           {signedIn && <button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>}
         </div>
       </header>
 
       <main id="top">
-        {section === "approval" && isAdmin ? (
+        {section === "approval" && isSuperadmin ? (
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
-          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} onBack={() => setSection("approval")} />
+          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
@@ -1099,24 +1124,24 @@ export default function Experience() {
             </section>
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
-              <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label><label className="filter-select"><Filter size={14} /><select value={trackFilter} onChange={(e) => setTrackFilter(e.target.value)} aria-label="Filter by track"><option>All tracks</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select><ChevronDown size={13} /></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
+              <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
               <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div>
-              <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => { setTrackFilter("All tracks"); setSearch(""); }}>Reset filters <X size={12} /></button></div>
-              <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>TRACK</th><th>RESPONSIBLE</th></tr></thead><tbody>
+              <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => setSearch("")}>Clear search <X size={12} /></button></div>
+              <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>RESPONSIBLE</th></tr></thead><tbody>
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
                   const periodKey = `${selectedProgram.id}:${item.date}:${period}`;
                   const periodExpanded = !period || expandedSessionPeriods.has(periodKey);
                   return <Fragment key={`${item.date}-${item.startTime ?? item.time}-${item.session}-${index}`}>
-                    {periodLabel && <tr className="session-period-row"><th colSpan={4} scope="rowgroup"><button type="button" aria-expanded={periodExpanded} onClick={() => setExpandedSessionPeriods((current) => {
+                    {periodLabel && <tr className="session-period-row"><th colSpan={3} scope="rowgroup"><button type="button" aria-expanded={periodExpanded} onClick={() => setExpandedSessionPeriods((current) => {
                       const next = new Set(current);
                       if (next.has(periodKey)) next.delete(periodKey);
                       else next.add(periodKey);
                       return next;
                     })}><ChevronRight size={14} />{periodLabel}</button></th></tr>}
-                    {periodExpanded && <tr className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td><span className={`track-pill ${trackColors[item.track] || ""}`}><span />{item.track}</span></td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>}
+                    {periodExpanded && <tr className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name">{item.session}</td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>}
                   </Fragment>;
                 })}
-                {!filteredSessions.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try another search or clear the selected track.</span></td></tr>}
+                {!filteredSessions.length && <tr><td colSpan={3} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try a different search term.</span></td></tr>}
               </tbody></table></div>
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>
             </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
@@ -1345,7 +1370,7 @@ function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, on
     <div className="admin-stats"><div className="admin-stat admin-stat--highlight"><span className="stat-label">NEEDS REVIEW</span><strong>{String(counts.Pending).padStart(2, "0")}</strong><span className="stat-foot"><span className="online-dot" />Pending registrations</span></div><div className="admin-stat"><span className="stat-label">APPROVED USERS</span><strong>{String(counts.Approved).padStart(2, "0")}</strong><span className="stat-foot">Cleared for sign-in</span></div><div className="admin-stat"><span className="stat-label">NOT APPROVED</span><strong>{String(counts.Disapproved).padStart(2, "0")}</strong><span className="stat-foot">Can be reviewed again</span></div><div className="admin-stat admin-quick-actions"><span className="stat-label">QUICK ACTIONS</span><button onClick={onAddProgram}><Plus size={15} /> Create a program <ArrowUpRight size={14} /></button><button onClick={onAddMaterial}><Plus size={15} /> Add a material <ArrowUpRight size={14} /></button></div></div>
     <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User approval <span>& directory</span></h2><p>Verified accounts appear here as Pending. Approve an account to unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
       <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>STATUS</th></tr></thead><tbody>
-        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{nameInitials(profile)}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="regular">regular</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
+        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{nameInitials(profile)}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="admin">admin</option><option value="regular">regular</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
         {!filtered.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}
       </tbody></table></div><div className="table-footnote"><span><LockKeyhole size={13} /> Personal details are private to superadmins.</span><span>{filtered.length} {filtered.length === 1 ? "account" : "accounts"}</span></div>
     </section>
@@ -1372,7 +1397,7 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
 
   return <div className="content-wrap dashboard-page confirmed-attendees-page">
     <div className="section-heading">
-      <div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Confirmed <span>Attendees</span></h2><p>Regular users who confirmed they plan to attend.</p></div>
+      <div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Confirmed <span>Attendees</span></h2><p>Regular users who confirmed they plan to attend.</p></div>
       <label className="confirmed-attendees-program"><span>Program</span><select value={selectedProgramId} onChange={(event) => onSelectProgram(event.target.value)} disabled={!programs.length}>
         {!programs.length && <option value="">No programs available</option>}
         {programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}
@@ -1384,19 +1409,19 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
         {attendees.map((profile) => <tr key={profile.uid}><td><strong className="table-primary">{fullName(profile)}</strong></td><td>{profile.position || "—"}</td><td>{profile.designation || "—"}</td><td>{profile.office || "—"}</td><td>{profile.email}</td><td>{profile.contactNo || "—"}</td></tr>)}
         {!attendees.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading confirmations…" : selectedProgram ? "No confirmed attendees yet" : "No program selected"}</strong><span>{loading ? "Confirmed attendees will appear here." : "This list updates when regular users confirm attendance."}</span></td></tr>}
       </tbody></table></div>
-      <div className="table-footnote"><span><LockKeyhole size={13} /> Attendee details are visible only to superadmins.</span><span>{attendees.length} confirmed</span></div>
+      <div className="table-footnote"><span><LockKeyhole size={13} /> Attendee details are visible to admins.</span><span>{attendees.length} confirmed</span></div>
     </section>
   </div>;
 }
 
-function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onAddMechanics, onEditMechanics, onDeleteMechanics, onBack }: {
+function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
   programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
   onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
   onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void;
-  onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; onBack: () => void;
+  onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; backLabel: string; onBack: () => void;
 }) {
   const actions = (label: string, onEdit: () => void, onDelete: () => void) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
-  return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> Back to approvals</button><div className="section-heading"><div><span className="eyebrow">SUPERADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
+  return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> {backLabel}</button><div className="section-heading"><div><span className="eyebrow">ADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
     <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest mechanics</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest mechanics have been added yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material))}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
@@ -1421,7 +1446,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
 
   return <>
     <div className="content-wrap dashboard-page contest-page">
-      <div className="section-heading contest-heading"><div><span className="eyebrow">SUPERADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
+      <div className="section-heading contest-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
       <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>View each contest's criteria and registered contestants.</p></div><span className="contest-count">{String(mechanics.length).padStart(2, "0")} CONTESTS</span></div>
         <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM</th><th>CONTEST</th><th>CRITERIA</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {mechanics.map((item) => {
@@ -1429,7 +1454,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
             return <tr key={item.id}><td><strong className="table-primary">{item.eventTitle}</strong><small className="table-muted">{dateRange(item.dateFrom, item.dateTo)} · {item.venue}</small></td><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contest-criteria-list">{(item.criteria || []).map((criterion, index) => <span key={`${criterion.criteria}-${index}`}>{criterion.criteria}</span>)}</div></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => setViewingContestants(item)}><Eye size={15} />View</button></div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
           {!mechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
-        </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified superadmins can view contestant details and edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
+        </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest mechanics.</span><span>{mechanics.length} {mechanics.length === 1 ? "contest" : "contests"}</span></div>
       </section>
     </div>
     {viewingContestants && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !confirmingJoinId) setViewingContestants(null); }}><section className="form-modal contestants-modal" role="dialog" aria-modal="true" aria-labelledby="contestants-modal-title"><div className="form-modal-head"><div><span className="eyebrow">CONTESTANTS</span><h2 id="contestants-modal-title">{viewingContestants.contest}<span>.</span></h2><p>{viewingContestants.eventTitle} · {dateRange(viewingContestants.dateFrom, viewingContestants.dateTo)}</p></div><button className="modal-close modal-close--inline" onClick={() => !confirmingJoinId && setViewingContestants(null)} aria-label="Close contestants list"><X size={19} /></button></div><div className="contestants-table-wrap"><table className="approval-table contestants-table"><thead><tr><th>NAME</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>STATUS / CONFIRM</th></tr></thead><tbody>{contestantsLoading ? <tr><td colSpan={5} className="empty-table">Loading contestants…</td></tr> : sortedJoins.length ? sortedJoins.map((join) => {
@@ -1498,17 +1523,17 @@ function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Materia
 }
 
 function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map((item) => ({ ...item, ...sessionTimeRange(item), allParticipants: Boolean(item.allParticipants), responsibleNotApplicable: Boolean(item.responsibleNotApplicable), responsible: responsiblePeople(item.responsible).length ? responsiblePeople(item.responsible) : [emptyResponsiblePerson()] })) : [{ date: "", startTime: "", endTime: "", session: "", track: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
+  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map(normalizeProgramSession) : [{ date: "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
   const updateSession = (index: number, updates: Partial<ProgramSession>) => setSessions((current) => current.map((session, i) => i === index ? { ...session, ...updates } : session));
   const updateResponsible = (sessionIndex: number, personIndex: number, field: keyof ResponsiblePerson, value: string) => setSessions((current) => current.map((session, i) => {
     if (i !== sessionIndex) return session;
     const people = responsiblePeople(session.responsible);
     return { ...session, responsible: people.map((person, j) => j === personIndex ? { ...person, [field]: value } : person) };
   }));
-  const addSession = () => setSessions((current) => [...current, { date: current[0]?.date || "", startTime: "", endTime: "", session: "", track: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
+  const addSession = () => setSessions((current) => [...current, { date: current[0]?.date || "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
   const addResponsible = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: [...responsiblePeople(session.responsible), emptyResponsiblePerson()] } : session));
   const removeResponsible = (sessionIndex: number, personIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: responsiblePeople(session.responsible).filter((_, j) => j !== personIndex) } : session));
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field><Field label="Theme"><input autoComplete="off" name="theme" defaultValue={initialProgram?.theme ?? ""} placeholder="e.g. Sustainable agriculture, thriving communities" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" defaultValue={initialProgram?.venue ?? ""} placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" defaultValue={initialProgram?.dateFrom ?? ""} onChange={(event) => { if (!sessions[0]?.date) updateSession(0, { date: event.target.value }); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" defaultValue={initialProgram?.dateTo ?? ""} required /></Field><Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, start and end time, and track.</p></div><button type="button" className="text-action" onClick={addSession}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}><div className="session-edit-main"><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><label className="session-edit-field session-edit-field--date"><span>Session date</span><input autoComplete="off" type="date" value={item.date} onChange={(event) => updateSession(index, { date: event.target.value })} required /></label><label className="session-edit-field session-edit-field--start"><span>Start time</span><input autoComplete="off" lang="en-US" type="time" aria-label="Start time (HH:MM AM/PM)" value={sessionTimeRange(item).startTime} onChange={(event) => updateSession(index, { startTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--end"><span>End time</span><input autoComplete="off" lang="en-US" type="time" aria-label="End time (HH:MM AM/PM)" value={sessionTimeRange(item).endTime} onChange={(event) => updateSession(index, { endTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label><label className="session-edit-field session-edit-field--track"><span>Track</span><select autoComplete="off" required value={item.track} onChange={(event) => updateSession(index, { track: event.target.value })}><option value="" disabled>Select track</option>{tracks.map((track) => <option key={track}>{track}</option>)}</select></label><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div><div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>{responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}><input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} /><input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} /><input autoComplete="off" aria-label="Responsible office" placeholder="Office" value={person.office} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "office", event.target.value)} /><span className="all-participants-slot">{personIndex === 0 ? <span className="responsible-options"><label className="all-participants-toggle"><input type="checkbox" aria-label="All Participants" checked={Boolean(item.allParticipants)} onChange={(event) => updateSession(index, { allParticipants: event.target.checked, responsibleNotApplicable: false })} /><span>All Participants</span></label><label className="all-participants-toggle"><input type="checkbox" aria-label="Responsible Not Applicable" checked={Boolean(item.responsibleNotApplicable)} onChange={(event) => updateSession(index, { responsibleNotApplicable: event.target.checked, allParticipants: false })} /><span>Responsible Not Applicable</span></label></span> : null}</span><button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable) || responsiblePeople(item.responsible).length <= 1} onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button></div>)}</div></section>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div></form></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}><div className="form-modal-head"><div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form autoComplete="off" onSubmit={(event) => { event.preventDefault(); const target = event.currentTarget; const hidden = target.querySelector<HTMLInputElement>("[name=flowJson]"); if (hidden) hidden.value = JSON.stringify(sessions); onCreate(event); }}><input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly /><div className="editor-grid"><Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field><Field label="Theme"><input autoComplete="off" name="theme" defaultValue={initialProgram?.theme ?? ""} placeholder="e.g. Sustainable agriculture, thriving communities" required /></Field><Field label="Venue"><input autoComplete="off" name="venue" defaultValue={initialProgram?.venue ?? ""} placeholder="City, venue, or online" required /></Field><Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" defaultValue={initialProgram?.dateFrom ?? ""} onChange={(event) => { if (!sessions[0]?.date) updateSession(0, { date: event.target.value }); }} required /></Field><Field label="Date to"><input autoComplete="off" type="date" name="dateTo" defaultValue={initialProgram?.dateTo ?? ""} required /></Field><Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field></div><div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, start and end time, and responsible people.</p></div><button type="button" className="text-action" onClick={addSession}><Plus size={15} /> Add a session</button></div><div className="session-edit-list">{sessions.map((item, index) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}><div className="session-edit-main"><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span><label className="session-edit-field session-edit-field--date"><span>Session date</span><input autoComplete="off" type="date" value={item.date} onChange={(event) => updateSession(index, { date: event.target.value })} required /></label><label className="session-edit-field session-edit-field--start"><span>Start time</span><input autoComplete="off" lang="en-US" type="time" aria-label="Start time (HH:MM AM/PM)" value={sessionTimeRange(item).startTime} onChange={(event) => updateSession(index, { startTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--end"><span>End time</span><input autoComplete="off" lang="en-US" type="time" aria-label="End time (HH:MM AM/PM)" value={sessionTimeRange(item).endTime} onChange={(event) => updateSession(index, { endTime: event.target.value })} required /></label><label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label><button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button></div><div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>{responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}><input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} /><input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} /><input autoComplete="off" aria-label="Responsible office" placeholder="Office" value={person.office} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "office", event.target.value)} /><span className="all-participants-slot">{personIndex === 0 ? <span className="responsible-options"><label className="all-participants-toggle"><input type="checkbox" aria-label="All Participants" checked={Boolean(item.allParticipants)} onChange={(event) => updateSession(index, { allParticipants: event.target.checked, responsibleNotApplicable: false })} /><span>All Participants</span></label><label className="all-participants-toggle"><input type="checkbox" aria-label="Responsible Not Applicable" checked={Boolean(item.responsibleNotApplicable)} onChange={(event) => updateSession(index, { responsibleNotApplicable: event.target.checked, allParticipants: false })} /><span>Responsible Not Applicable</span></label></span> : null}</span><button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable) || responsiblePeople(item.responsible).length <= 1} onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button></div>)}</div></section>)}</div><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div></form></div></div>;
 }
 
 function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: { programs: Program[]; initialMaterial: Material | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; busy: boolean }) {

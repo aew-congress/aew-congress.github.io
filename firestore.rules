@@ -15,9 +15,20 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'superadmin';
     }
 
+    function profileIsAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role in ['admin', 'superadmin'];
+    }
+
     function isSuperadmin() {
       return verified()
         && (request.auth.token.email == 'rjamescute2@gmail.com' || profileIsSuperadmin());
+    }
+
+    function isAdmin() {
+      return verified()
+        && (request.auth.token.email == 'rjamescute2@gmail.com' || profileIsAdmin());
     }
 
     function isApprovedMember() {
@@ -29,7 +40,7 @@ service cloud.firestore {
 
     function isRegularMember() {
       return isApprovedMember()
-        && !isSuperadmin()
+        && !isAdmin()
         && (!('role' in get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data)
           || get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'regular');
     }
@@ -50,7 +61,7 @@ service cloud.firestore {
     }
 
     match /userProfiles/{uid} {
-      allow get: if isSuperadmin() || (signedIn() && request.auth.uid == uid);
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow list: if isSuperadmin();
       allow create: if signedIn()
         && request.auth.uid == uid
@@ -67,7 +78,7 @@ service cloud.firestore {
       allow update: if canConfirmEmailVerification(uid)
         || (isSuperadmin()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt'])
-          && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'regular'])
+          && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'admin', 'regular'])
           && request.resource.data.status in ['Pending', 'Approved', 'Disapproved']
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) || resource.data.emailVerified == true));
       allow delete: if isSuperadmin();
@@ -75,23 +86,23 @@ service cloud.firestore {
 
     match /programs/{programId} {
       allow read: if true;
-      allow create, update, delete: if isSuperadmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /materials/{materialId} {
-      allow read: if isSuperadmin() || isApprovedMember();
-      allow create, update, delete: if isSuperadmin();
+      allow read: if isAdmin() || isApprovedMember();
+      allow create, update, delete: if isAdmin();
     }
 
     match /contestMechanics/{contestId} {
-      allow read: if isSuperadmin() || isApprovedMember();
-      allow create, update, delete: if isSuperadmin();
+      allow read: if isAdmin() || isApprovedMember();
+      allow create, update, delete: if isAdmin();
     }
 
     match /contestJoins/{joinId} {
-      allow read: if isSuperadmin()
+      allow read: if isAdmin()
         || (isApprovedMember() && resource.data.uid == request.auth.uid);
-      allow create: if isApprovedMember()
+      allow create: if isRegularMember()
         && request.resource.data.keys().hasAll([
           'contestId', 'programId', 'contest', 'uid', 'joinedAt'
         ])
@@ -103,14 +114,14 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId))
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.programId == request.resource.data.programId
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.contest == request.resource.data.contest;
-      allow update, delete: if isSuperadmin();
+      allow update, delete: if isAdmin();
     }
 
     match /attendanceConfirmations/{confirmationId} {
-      allow get: if isSuperadmin()
+      allow get: if isAdmin()
         || (isRegularMember()
           && (resource == null || resource.data.uid == request.auth.uid));
-      allow list: if isSuperadmin();
+      allow list: if isAdmin();
       allow create: if isRegularMember()
         && request.resource.data.keys().hasAll(['programId', 'uid', 'confirmedAt'])
         && request.resource.data.keys().hasOnly(['programId', 'uid', 'confirmedAt'])

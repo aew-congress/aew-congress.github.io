@@ -45,9 +45,10 @@ git push -u origin main
 
 ## Features
 
-- Public program listing with date, venue, daily session flow, search, and track filters.
+- Public program listing with date, venue, daily session flow, and search.
 - Public materials shelf grouped by Guidelines, Presentation, References, and Worksheet.
 - Account registration with the requested member details, Philippine mobile format, email verification, and admin approval flow.
 - Superadmin approval queue with Pending, Approved, and Disapproved states.
+- Admins can manage programs, contests, and materials without access to user approval controls.
 - Unverified accounts stay out of the approval queue; members cannot access signed-in views until approved and email-verified.
 - Admin program and resource editors; file uploads pass through a Cloudflare Worker that validates the Firebase ID token and approved account before contacting UploadThing.

@@ -74,6 +74,8 @@ export type ContestMechanics = {
   dateTo: string;
   venue: string;
   contest: string;
+  contestDate?: string;
+  timeStart?: string;
   criteria: ContestCriterion[];
   createdAt?: unknown;
   createdBy: string;

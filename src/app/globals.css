@@ -171,7 +171,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .speakers-heading h2 { margin-bottom: 7px; }
 .speakers-heading p { margin: 0; color: #899082; font-size: 14px; }
 .speakers-controls { display: flex; align-items: flex-end; gap: 10px; }
-.speakers-program-filter { position: relative; display: grid; gap: 5px; min-width: 225px; color: #8b9282; font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.program-filter-dropdown { position: relative; display: grid; gap: 5px; min-width: 225px; color: #8b9282; font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .speakers-filter-trigger { width: 100%; height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border: 1px solid #e2e6da; border-radius: 9px; outline: 0; background: #fff; color: #576048; font-family: inherit; font-size: 12px; font-weight: 650; line-height: 1; letter-spacing: normal; text-align: left; text-transform: none; cursor: pointer; transition: border-color .16s, box-shadow .16s; }
 .speakers-filter-trigger:hover, .speakers-filter-trigger[aria-expanded="true"] { border-color: #b8c49a; }
 .speakers-filter-trigger:focus-visible { border-color: #aab989; box-shadow: 0 0 0 3px #758c3926; }
@@ -321,14 +321,15 @@ img { -webkit-user-drag: none; user-select: none; }
 .contest-count { color: #929a86; font-size: 10px; font-weight: 800; letter-spacing: .13em; white-space: nowrap; }
 .contest-panel + .contest-panel, .contest-mechanics-detail { margin-top: 22px; }
 .contest-panel-heading { align-items: center; }
+.contest-member-filter { width: min(260px, 100%); }
 .contest-panel-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .contest-program-filter { display: grid; gap: 4px; min-width: 220px; color: #929a86; font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .contest-program-filter select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #e2e6da; border-radius: 8px; outline: 0; background: #fff; color: #576048; font-size: 12px; font-weight: 600; letter-spacing: normal; text-transform: none; }
-.contest-table { min-width: 890px; }
+.contest-table { min-width: 820px; }
 .contest-table th { height: 44px; }
 .contest-table td { padding-block: 15px; font-size: 13px; }
-.contest-table td:first-child { min-width: 250px; white-space: normal; }
-.contest-table td:nth-child(2) { min-width: 185px; white-space: normal; }
+.contest-table td:first-child { min-width: 180px; white-space: normal; }
+.contest-table td:nth-child(2) { min-width: 250px; max-width: none; white-space: normal; }
 .contest-table td:nth-child(3), .contest-table td:nth-child(4) { min-width: 130px; max-width: none; white-space: nowrap; }
 .contest-table.contest-table--directory { min-width: 760px; table-layout: fixed; }
 .contest-table--directory th:nth-child(1), .contest-table--directory td:nth-child(1) { width: 58%; }
@@ -368,6 +369,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .contest-editor { width: min(920px, 100%); }
 .contest-editor .form-modal-head { margin-bottom: 18px; }
 .contest-editor form > .field { margin: 13px 0; }
+.contest-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 13px 0; }
 .contest-editor .field-control > input, .contest-editor .field-control > select { height: 44px; font-size: 14px; }
 .contest-editor .form-modal-actions .button { height: 44px; font-size: 14px; }
 .criteria-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 19px 0 10px; padding: 12px 0 9px; border-top: 1px solid #e9ece5; color: #78816d; font-size: 11px; font-weight: 850; letter-spacing: .13em; }
@@ -434,7 +436,8 @@ img { -webkit-user-drag: none; user-select: none; }
   .speakers-page { padding-top: 37px; padding-bottom: 58px; }
   .speakers-heading { align-items: flex-start; flex-direction: column; gap: 15px; }
   .speakers-controls { width: 100%; flex-direction: column; align-items: stretch; }
-  .speakers-program-filter { width: 100%; min-width: 0; }
+  .speakers-controls .program-filter-dropdown { width: 100%; min-width: 0; }
+  .contest-member-filter { width: 100%; min-width: 0; }
   .speakers-controls .button { width: 100%; }
   .speaker-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 13px; }
   .speaker-profile-photo { height: 390px; flex-basis: 390px; }
@@ -442,6 +445,7 @@ img { -webkit-user-drag: none; user-select: none; }
   .speaker-editor-grid { grid-template-columns: 1fr; gap: 9px; }
   .speaker-name-row { grid-column: auto; grid-template-columns: minmax(0, 1fr) minmax(105px, .42fr); gap: 9px; }
   .contest-editor { width: min(100%, 680px); padding: 20px 16px; }
+  .contest-schedule-fields { grid-template-columns: 1fr; gap: 0; }
   .criteria-editor-heading { align-items: flex-start; }
   .criteria-editor-heading .text-action { white-space: nowrap; }
   .criteria-editor-row { grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) 30px; gap: 8px; padding: 10px; }

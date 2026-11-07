@@ -104,6 +104,13 @@ function formatTimeValue(value: string) {
   return `${String(hour % 12 || 12).padStart(2, "0")}:${minute} ${period}`;
 }
 
+function compareContestSchedule(a: Pick<ContestMechanics, "contest" | "contestDate" | "timeStart">, b: Pick<ContestMechanics, "contest" | "contestDate" | "timeStart">) {
+  const dateOrder = (a.contestDate || "9999-12-31").localeCompare(b.contestDate || "9999-12-31");
+  if (dateOrder) return dateOrder;
+  const timeOrder = (a.timeStart || "99:99").localeCompare(b.timeStart || "99:99");
+  return timeOrder || a.contest.localeCompare(b.contest);
+}
+
 function sessionTimeLabel(item: ProgramSession) {
   const { startTime, endTime } = sessionTimeRange(item);
   if (startTime && endTime) return `${formatTimeValue(startTime)} – ${formatTimeValue(endTime)}`;
@@ -980,6 +987,8 @@ export default function Experience() {
     const program = programs.find((item) => item.id === String(form.get("programId")));
     if (!program) { setToast({ kind: "error", text: "Choose a published program for these mechanics." }); return; }
     const contest = String(form.get("contest")).trim().replace(/\s+/g, " ");
+    const contestDate = String(form.get("contestDate") ?? "").trim();
+    const timeStart = String(form.get("timeStart") ?? "").trim();
     let criteria: Array<{ criteria: string; description: string; weight: number }>;
     try {
       const rows = JSON.parse(String(form.get("criteriaRows"))) as Array<{ criteria?: unknown; description?: unknown; weight?: unknown }>;
@@ -991,6 +1000,10 @@ export default function Experience() {
     } catch {
       criteria = [];
     }
+    if (!contestDate || !timeStart) {
+      setToast({ kind: "error", text: "Choose a contest date and start time." });
+      return;
+    }
     if (!contest || !criteria.length || criteria.some((row) => !row.criteria || !row.description || !Number.isFinite(row.weight) || row.weight < 0)) {
       setToast({ kind: "error", text: "Complete every criteria row and enter a non-negative weight for each." });
       return;
@@ -1001,7 +1014,7 @@ export default function Experience() {
       if (editingMechanics) {
         const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
         const updates = [
-          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, criteria, updatedAt: serverTimestamp() } },
+          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, updatedAt: serverTimestamp() } },
           ...joins.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id, data: { programId: program.id, contest, updatedAt: serverTimestamp() } })),
         ];
         for (let start = 0; start < updates.length; start += 450) {
@@ -1020,6 +1033,8 @@ export default function Experience() {
             const current = existing.data() as ContestMechanics;
             transaction.update(mechanicsRef, {
               criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
+              contestDate,
+              timeStart,
               updatedAt: serverTimestamp(),
             });
           } else {
@@ -1030,6 +1045,8 @@ export default function Experience() {
               dateTo: program.dateTo,
               venue: program.venue,
               contest,
+              contestDate,
+              timeStart,
               criteria,
               createdAt: serverTimestamp(),
               createdBy: adminUser.uid,
@@ -1190,7 +1207,7 @@ export default function Experience() {
         ) : section === "contestMechanics" && isAdmin ? (
           <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
-          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={(contest) => setContestJoinConfirm(contest)} />
+          <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
           <SpeakersPage speakers={speakers} programs={programs} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
         ) : section === "materials" ? (
@@ -1254,6 +1271,76 @@ export default function Experience() {
   );
 }
 
+function ProgramFilterDropdown({ id, programs, value, onChange, className = "" }: {
+  id: string;
+  programs: Program[];
+  value: string;
+  onChange: (programId: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeOption, setActiveOption] = useState(0);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const options = [{ id: "", label: "All programs" }, ...programs.map((program) => ({ id: program.id, label: program.eventTitle }))];
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === value));
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!dropdownRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape" || event.key === "Tab") {
+      setOpen(false);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) {
+        setActiveOption(selectedIndex);
+        setOpen(true);
+      } else {
+        setActiveOption((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length);
+      }
+      return;
+    }
+    if (event.key === "Home" || event.key === "End") {
+      if (!open) return;
+      event.preventDefault();
+      setActiveOption(event.key === "Home" ? 0 : options.length - 1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!open) {
+        setActiveOption(selectedIndex);
+        setOpen(true);
+      } else {
+        const option = options[activeOption];
+        if (option) onChange(option.id);
+        setOpen(false);
+      }
+    }
+  }
+
+  return <div className={`program-filter-dropdown ${className}`.trim()} ref={dropdownRef}>
+    <span id={`${id}-label`}>Program</span>
+    <button ref={triggerRef} type="button" role="combobox" aria-autocomplete="none" className="speakers-filter-trigger" aria-labelledby={`${id}-label ${id}-value`} aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-options`} aria-activedescendant={open ? `${id}-option-${activeOption}` : undefined} onClick={() => { if (!open) setActiveOption(selectedIndex); setOpen((current) => !current); }} onKeyDown={handleKeyDown}>
+      <span id={`${id}-value`}>{options.find((option) => option.id === value)?.label ?? "All programs"}</span><ChevronDown size={16} aria-hidden="true" />
+    </button>
+    {open && <div className="speakers-filter-menu" id={`${id}-options`} role="listbox" aria-label="Programs">
+      {options.map((option, index) => <button className={`speakers-filter-option${index === activeOption ? " speakers-filter-option--active" : ""}`} id={`${id}-option-${index}`} key={option.id || "all-programs"} type="button" role="option" aria-selected={option.id === value} onMouseEnter={() => setActiveOption(index)} onClick={() => { onChange(option.id); setOpen(false); triggerRef.current?.focus(); }}>
+        <span>{option.label}</span>{option.id === value && <Check size={16} aria-hidden="true" />}
+      </button>)}
+    </div>}
+  </div>;
+}
+
 function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onDelete }: {
   speakers: SpeakerProfileCard[];
   programs: Program[];
@@ -1264,73 +1351,14 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
   onDelete: (speaker: SpeakerProfileCard) => void;
 }) {
   const [programFilter, setProgramFilter] = useState("");
-  const [programFilterOpen, setProgramFilterOpen] = useState(false);
-  const [activeProgramOption, setActiveProgramOption] = useState(0);
-  const programFilterRef = useRef<HTMLDivElement>(null);
-  const programFilterTriggerRef = useRef<HTMLButtonElement>(null);
-  const programFilterOptions = [{ id: "", label: "All programs" }, ...programs.map((program) => ({ id: program.id, label: program.eventTitle }))];
-  const selectedProgramIndex = Math.max(0, programFilterOptions.findIndex((option) => option.id === programFilter));
   const programsById = new Map(programs.map((program) => [program.id, program]));
   const displayed = speakers.filter((speaker) => !programFilter || speaker.programId === programFilter);
-
-  useEffect(() => {
-    if (!programFilterOpen) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (!programFilterRef.current?.contains(event.target as Node)) setProgramFilterOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [programFilterOpen]);
-
-  function handleProgramFilterKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "Escape" || event.key === "Tab") {
-      setProgramFilterOpen(false);
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      if (!programFilterOpen) {
-        setActiveProgramOption(selectedProgramIndex);
-        setProgramFilterOpen(true);
-      } else {
-        setActiveProgramOption((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + programFilterOptions.length) % programFilterOptions.length);
-      }
-      return;
-    }
-    if (event.key === "Home" || event.key === "End") {
-      if (!programFilterOpen) return;
-      event.preventDefault();
-      setActiveProgramOption(event.key === "Home" ? 0 : programFilterOptions.length - 1);
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (!programFilterOpen) {
-        setActiveProgramOption(selectedProgramIndex);
-        setProgramFilterOpen(true);
-      } else {
-        const option = programFilterOptions[activeProgramOption];
-        if (option) setProgramFilter(option.id);
-        setProgramFilterOpen(false);
-      }
-    }
-  }
 
   return <div className="content-wrap dashboard-page speakers-page">
     <div className="section-heading speakers-heading">
       <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know the <span>Speakers</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
       <div className="speakers-controls">
-        <div className="speakers-program-filter" ref={programFilterRef}>
-          <span id="speaker-program-filter-label">Program</span>
-          <button ref={programFilterTriggerRef} type="button" role="combobox" aria-autocomplete="none" className="speakers-filter-trigger" aria-labelledby="speaker-program-filter-label speaker-program-filter-value" aria-haspopup="listbox" aria-expanded={programFilterOpen} aria-controls="speaker-program-filter-options" aria-activedescendant={programFilterOpen ? `speaker-program-option-${activeProgramOption}` : undefined} onClick={() => { if (!programFilterOpen) setActiveProgramOption(selectedProgramIndex); setProgramFilterOpen((open) => !open); }} onKeyDown={handleProgramFilterKeyDown}>
-            <span id="speaker-program-filter-value">{programFilterOptions.find((option) => option.id === programFilter)?.label ?? "All programs"}</span><ChevronDown size={16} aria-hidden="true" />
-          </button>
-          {programFilterOpen && <div className="speakers-filter-menu" id="speaker-program-filter-options" role="listbox" aria-label="Programs">
-            {programFilterOptions.map((option, index) => <button className={`speakers-filter-option${index === activeProgramOption ? " speakers-filter-option--active" : ""}`} id={`speaker-program-option-${index}`} key={option.id || "all-programs"} type="button" role="option" aria-selected={option.id === programFilter} onMouseEnter={() => setActiveProgramOption(index)} onClick={() => { setProgramFilter(option.id); setProgramFilterOpen(false); programFilterTriggerRef.current?.focus(); }}>
-              <span>{option.label}</span>{option.id === programFilter && <Check size={16} aria-hidden="true" />}
-            </button>)}
-          </div>}
-        </div>
+        <ProgramFilterDropdown id="speaker-program-filter" programs={programs} value={programFilter} onChange={setProgramFilter} />
         {isAdmin && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={16} /> Add speaker</button>}
       </div>
     </div>
@@ -1629,7 +1657,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
 }) {
   const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
   const [selectedProgramId, setSelectedProgramId] = useState("");
-  const filteredMechanics = selectedProgramId ? mechanics.filter((item) => item.programId === selectedProgramId) : mechanics;
+  const filteredMechanics = (selectedProgramId ? mechanics.filter((item) => item.programId === selectedProgramId) : mechanics).slice().sort(compareContestSchedule);
   const profilesByUid = new Map(profiles.map((profile) => [profile.uid, profile]));
   const selectedJoins = viewingContestants ? joins.filter((join) => join.contestId === viewingContestants.id) : [];
   const sortedJoins = selectedJoins.slice().sort((a, b) => {
@@ -1647,7 +1675,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
             return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => setViewingContestants(item)}><Eye size={15} />View</button></div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
-          {!filteredMechanics.length && <tr><td colSpan={3} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : selectedProgramId ? "No contest mechanics for this program" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : selectedProgramId ? "Add contest mechanics for this program to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
+          {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest mechanics…" : selectedProgramId ? "No contest mechanics for this program" : "No contest mechanics yet"}</strong><span>{loading ? "Saved contests will appear here." : selectedProgramId ? "Add contest mechanics for this program to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest mechanics."}</span></td></tr>}
         </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest mechanics.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
       </section>
     </div>
@@ -1659,21 +1687,23 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
   </>;
 }
 
-function ContestsPage({ contests, joinedContestIds, joinedContestStatuses, joiningContestId, loading, onJoin }: {
-  contests: ContestMechanics[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
+function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatuses, joiningContestId, loading, onJoin }: {
+  contests: ContestMechanics[]; programs: Program[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
 }) {
   const [selectedContestId, setSelectedContestId] = useState("");
-  const selectedContest = contests.find((contest) => contest.id === selectedContestId);
+  const [selectedProgramId, setSelectedProgramId] = useState("");
+  const displayedContests = contests.filter((contest) => !selectedProgramId || contest.programId === selectedProgramId).slice().sort(compareContestSchedule);
+  const selectedContest = displayedContests.find((contest) => contest.id === selectedContestId);
   return <div className="content-wrap dashboard-page contest-page">
-    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their mechanics, and join when you’re ready.</p></div><span className="contest-count">{String(contests.length).padStart(2, "0")} {contests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
-    <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div></div>
-      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM / EVENT</th><th>CONTEST</th><th>JOIN</th><th>MECHANICS</th></tr></thead><tbody>
-        {contests.map((contest) => {
+    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their mechanics, and join when you’re ready.</p></div><span className="contest-count">{String(displayedContests.length).padStart(2, "0")} {displayedContests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
+    <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div><ProgramFilterDropdown id="member-contest-program-filter" programs={programs} value={selectedProgramId} className="contest-member-filter" onChange={(programId) => { setSelectedProgramId(programId); setSelectedContestId(""); }} /></div>
+      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>CONTEST DATE/TIME</th><th>CONTEST</th><th>JOIN</th><th>MECHANICS</th></tr></thead><tbody>
+        {displayedContests.map((contest) => {
           const joined = joinedContestIds.includes(contest.id);
           const qualified = joinedContestStatuses[contest.id] === "Qualified Contestant";
-          return <tr key={contest.id}><td><strong className="table-primary">{contest.eventTitle}</strong><small className="table-muted">{dateRange(contest.dateFrom, contest.dateTo)} · {contest.venue}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide mechanics" : "View mechanics"}<ArrowUpRight size={14} /></button></td></tr>;
+          return <tr key={contest.id}><td><strong className="table-primary">{contest.contestDate ? displayDate(contest.contestDate) : "Date to be announced"}</strong><small className="table-muted">{contest.timeStart ? formatTimeValue(contest.timeStart) : "Time to be announced"}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide mechanics" : "View mechanics"}<ArrowUpRight size={14} /></button></td></tr>;
         })}
-        {!contests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : "Check back when a program contest is announced."}</span></td></tr>}
+        {!displayedContests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : selectedProgramId ? "No contests for this program yet" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : selectedProgramId ? "Choose another program or check back when a contest is announced." : "Check back when a program contest is announced."}</span></td></tr>}
       </tbody></table></div>
     </section>
     {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>mechanics</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
@@ -1689,6 +1719,7 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest mechanics" : "Add contest mechanics"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest mechanics" : "Add contest mechanics"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <Field label="Program"><select name="programId" required defaultValue={initialMechanics?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
     <Field label="Contest"><input name="contest" defaultValue={initialMechanics?.contest ?? ""} placeholder="e.g. Agri-innovation showcase" required /></Field>
+    <div className="contest-schedule-fields"><Field label="Contest Date"><input type="date" name="contestDate" defaultValue={initialMechanics?.contestDate ?? ""} required /></Field><Field label="Time Start"><input type="time" name="timeStart" defaultValue={initialMechanics?.timeStart ?? ""} required /></Field></div>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
     <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>

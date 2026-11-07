@@ -25,8 +25,8 @@ export const metadata: Metadata = {
     images: ["/og.png"],
   },
   icons: {
-    icon: "/AEW_logo.png",
-    shortcut: "/AEW_logo.png",
+    icon: "/favicon-aew-transparent.png",
+    shortcut: "/favicon-aew-transparent.png",
     apple: "/AEW_logo.png",
   },
 };

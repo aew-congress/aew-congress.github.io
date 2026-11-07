@@ -19,6 +19,7 @@ import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
+const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
@@ -1899,7 +1900,7 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
 }
 
 function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, onDownload, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; isRegularMember: boolean; onAdd: () => void; onDownload: (material: Material) => void; loading: boolean }) {
-  const [category, setCategory] = useState("All resources");
+  const [category, setCategory] = useState<MaterialCategory>("Presentation");
   const [program, setProgram] = useState("All programs");
   const [queryText, setQueryText] = useState("");
   const [dailyIndex, setDailyIndex] = useState(0);
@@ -1914,7 +1915,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
   const dailyWindowStart = Math.min(Math.max(0, selectedDailyIndex - 1), Math.max(0, dailyOptions.length - 3));
   const visibleDayTabs = dailyOptions.slice(dailyWindowStart, dailyWindowStart + 3).map((date) => ({ date, index: dailyOptions.indexOf(date) }));
   const displayed = availableMaterials.filter((material) =>
-    (category === "All resources" || material.category === category)
+    material.category === category
     && (program === "All programs" || material.programId === program)
     && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""}`.toLowerCase().includes(queryText.toLowerCase()))
   );
@@ -1936,7 +1937,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
       <label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => { setProgram(event.target.value); setDailyIndex(0); }} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>
       {isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add material</button>}
     </div>
-    <div className="resource-categories">{["All resources", ...categories].map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation") setDailyIndex(0); }}>{item}<span>{item === "All resources" ? availableMaterials.length : availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
+    <div className="resource-categories">{resourceCategoryOrder.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation") setDailyIndex(0); }}>{item}<span>{availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
     {isPresentationMemberView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
     {isPresentationMemberView ? <section className="presentation-topic-library" aria-label="Presentation topics">
       <div className="presentation-topics-heading"><span className="eyebrow">TOPIC</span><p>Choose a topic to view and download its materials.</p></div>

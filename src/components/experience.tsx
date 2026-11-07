@@ -1600,6 +1600,8 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
     .map((item) => item.session.trim())
     .filter(Boolean)))].sort((a, b) => a.localeCompare(b));
   const displayed = programSpeakers.filter((speaker) => {
+    // Admins manage the full speaker directory; do not apply the hidden public day/session filters.
+    if (isAdmin) return true;
     const sessions = speaker.keynoteSessions ?? [];
     const matchesDay = !selectedDate || sessions.some((item) => item.date === selectedDate);
     const matchesKeynote = !keynoteFilter || sessions.some((item) => item.session === keynoteFilter && (!selectedDate || item.date === selectedDate));

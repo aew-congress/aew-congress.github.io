@@ -2671,10 +2671,7 @@ function ReferencePdfPreview({ attachment, materialName }: { attachment: Materia
         pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
         loadingTask = pdfjs.getDocument({ url: sourceUrl });
         const document = await loadingTask.promise;
-        if (!active) {
-          await document.destroy();
-          return;
-        }
+        if (!active) return;
         setPdfDocument(document);
       } catch {
         if (active) setFailed(true);

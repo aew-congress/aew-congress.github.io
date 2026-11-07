@@ -186,7 +186,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .speakers-count-row { display: flex; align-items: center; gap: 9px; margin-bottom: 15px; color: #929a86; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .speakers-count-row i { width: 4px; height: 4px; border-radius: 50%; background: var(--yellow); }
 .speakers-count-row span:last-child { color: #a1a695; }
-.speaker-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 18px; align-items: start; }
+.speaker-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); grid-auto-rows: 1fr; gap: 18px; align-items: start; }
 .speaker-profile-card { height: 620px; min-width: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #e2e7da; border-radius: 17px; background: #fff; box-shadow: 0 9px 25px #3446150d, inset 1px 2px 5px #fff; animation: row-in .35s both; transition: transform .2s, box-shadow .2s; }
 .speaker-profile-card:hover { transform: translateY(-3px); box-shadow: 0 15px 32px #34461518; }
 .speaker-profile-photo { height: clamp(330px, 34vw, 430px); flex: 0 0 clamp(330px, 34vw, 430px); position: relative; overflow: hidden; background: linear-gradient(145deg, #dae2ca, #82916a); }
@@ -217,6 +217,19 @@ img { -webkit-user-drag: none; user-select: none; }
 .speakers-empty h2 { margin: 9px 0 5px; color: #303629; font-size: 25px; letter-spacing: -.045em; }
 .speakers-empty p { max-width: 400px; margin: 0 0 15px; color: #899082; font-size: 12px; line-height: 1.6; }
 .speakers-empty .button { height: 37px; font-size: 12px; }
+
+@media (min-width: 1200px) {
+  .speaker-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .speaker-profile-card { height: 500px; }
+  .speaker-profile-photo { height: 290px; flex-basis: 290px; }
+  .speaker-profile-title { right: 14px; bottom: 14px; left: 14px; }
+  .speaker-profile-title h3 { font-size: clamp(12px, 1vw, 17px); }
+  .speaker-profile-title p { font-size: 10px; }
+  .speaker-profile-details { gap: 11px; padding: 13px 13px 15px; }
+  .speaker-detail-section { gap: 7px; }
+  .speaker-topic-list { gap: 5px; }
+  .speaker-topic-list > span { min-height: 22px; padding: 3px 7px; font-size: 9px; }
+}
 
 .materials-page { padding-top: 61px; padding-bottom: 80px; }
 .materials-hero { min-height: 300px; display: flex; align-items: center; justify-content: space-between; position: relative; border-bottom: 1px solid var(--line); overflow: hidden; }

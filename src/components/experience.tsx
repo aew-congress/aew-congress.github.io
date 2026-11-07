@@ -1200,7 +1200,7 @@ export default function Experience() {
 
             {section === "programs" && <>
             <section className="content-wrap program-section" id="program-list">
-              <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>PROGRAMS</span></span>{isAdmin && <button className="button button--soft" onClick={() => openProgramEditor()}><Plus size={16} /> New program</button>}</div></div>
+              <div className="section-heading"><div><span className="eyebrow">THE CALENDAR</span><h2>Programs <span>& gatherings</span></h2></div><div className="heading-side"><span className="section-count">{programs.length.toString().padStart(2, "0")} <span>{programs.length === 1 ? "PROGRAM" : "PROGRAMS"}</span></span>{isAdmin && <button className="button button--soft" onClick={() => openProgramEditor()}><Plus size={16} /> New program</button>}</div></div>
               <div className="program-cards">
                 {programs.map((program, index) => <button key={program.id} className={`program-card ${selectedProgram?.id === program.id ? "program-card--selected" : ""}`} onClick={() => { setSelectedProgramId(program.id); setSelectedDay(0); }}>
                   <span className={`program-card-num program-card-num--${index % 3}`}>{String(index + 1).padStart(2, "0")}</span><div className="program-card-main"><span className="card-date"><CalendarDays size={13} />{dateRange(program.dateFrom, program.dateTo)}</span><h3>{program.eventTitle}</h3>{program.theme && <span className="program-card-theme">{program.theme}</span>}<span className="card-location"><MapPin size={13} />{program.venue}</span></div><span className="program-card-arrow"><ArrowUpRight size={18} /></span>
@@ -1345,7 +1345,7 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
         </div>
         <div className="speaker-profile-details">
           {!!speaker.affiliations?.length && <section className="speaker-detail-section"><div className="speaker-affiliations">{speaker.affiliations.map((item, positionIndex) => <p key={`${item.position}-${item.organization}-${positionIndex}`}><strong>{item.position}</strong><i />{item.organization}</p>)}</div></section>}
-          {!!speaker.topics?.length && <section className="speaker-detail-section speaker-topics-section"><span>TOPICS</span><div className="speaker-topic-list">{speaker.topics.map((topic, topicIndex) => <span key={`${topic}-${topicIndex}`}>{topic}</span>)}</div></section>}
+          {!!speaker.topics?.length && <section className="speaker-detail-section speaker-topics-section"><span>{speaker.topics.length === 1 ? "TOPIC" : "TOPICS"}</span><div className="speaker-topic-list">{speaker.topics.map((topic, topicIndex) => <span key={`${topic}-${topicIndex}`}>{topic}</span>)}</div></section>}
         </div>
       </article>;
     })}</div>
@@ -1641,7 +1641,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
   return <>
     <div className="content-wrap dashboard-page contest-page">
       <div className="section-heading contest-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Contest <span>& mechanics</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add mechanics</button></div>
-      <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>View each contest's criteria and registered contestants.</p></div><div className="contest-panel-controls"><label className="contest-program-filter"><span>Program</span><select value={selectedProgramId} onChange={(event) => setSelectedProgramId(event.target.value)} aria-label="Filter contests by program"><option value="">All programs</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></label><span className="contest-count">{String(filteredMechanics.length).padStart(2, "0")} CONTESTS</span></div></div>
+      <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published mechanics</h2><p>View each contest's criteria and registered contestants.</p></div><div className="contest-panel-controls"><label className="contest-program-filter"><span>Program</span><select value={selectedProgramId} onChange={(event) => setSelectedProgramId(event.target.value)} aria-label="Filter contests by program"><option value="">All programs</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></label><span className="contest-count">{String(filteredMechanics.length).padStart(2, "0")} {filteredMechanics.length === 1 ? "CONTEST" : "CONTESTS"}</span></div></div>
         <div className="approval-table-wrap"><table className="approval-table contest-table contest-table--directory"><thead><tr><th>CONTEST</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {filteredMechanics.map((item) => {
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
@@ -1665,7 +1665,7 @@ function ContestsPage({ contests, joinedContestIds, joinedContestStatuses, joini
   const [selectedContestId, setSelectedContestId] = useState("");
   const selectedContest = contests.find((contest) => contest.id === selectedContestId);
   return <div className="content-wrap dashboard-page contest-page">
-    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their mechanics, and join when you’re ready.</p></div><span className="contest-count">{String(contests.length).padStart(2, "0")} CONTESTS</span></div>
+    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their mechanics, and join when you’re ready.</p></div><span className="contest-count">{String(contests.length).padStart(2, "0")} {contests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
     <section className="approval-panel contest-panel"><div className="panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div></div>
       <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>PROGRAM / EVENT</th><th>CONTEST</th><th>JOIN</th><th>MECHANICS</th></tr></thead><tbody>
         {contests.map((contest) => {

@@ -15,6 +15,7 @@ import {
   Menu, Maximize2, Minimize2, Pencil, Plus, Printer, QrCode, Redo2, Search, ShieldCheck, Sparkles, Strikethrough, Trash2, Underline, Undo2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import sanitizeHtml from "sanitize-html";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
@@ -265,6 +266,19 @@ function isImageAttachment(file: MaterialFile) {
     || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:[?#\s]|$)/i.test(`${file.name} ${file.url}`);
 }
 
+function isPdfAttachment(file: MaterialFile) {
+  return file.type?.toLowerCase().includes("pdf") === true
+    || /\.pdf(?:[?#\s]|$)/i.test(`${file.name} ${file.url}`);
+}
+
+function materialPdfPreviewUrl(file: MaterialFile) {
+  if (!isUploadThingFile(file.url)) return file.url;
+  const previewUrl = new URL(uploadthingDownloadEndpoint);
+  previewUrl.searchParams.set("url", file.url);
+  previewUrl.searchParams.set("name", file.name);
+  return previewUrl.toString();
+}
+
 function isUploadThingFile(value: string) {
   try {
     const url = new URL(value);
@@ -383,6 +397,7 @@ export default function Experience() {
   const isAdmin = isSuperadmin || Boolean(user && user.emailVerified && profileRole(activeProfile ?? {}) === "admin");
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
+  const canViewPhotoDocs = guestAccess || isRegularMember || isAdmin || isSuperadmin;
   const isDesignatedJudge = activeProfile?.judge === "Yes" || profiles.some((profile) => profile.uid === user?.uid && profile.judge === "Yes");
   const canJudgeContests = Boolean(user?.emailVerified && isDesignatedJudge && (isAdmin || isRegularMember));
   const signedIn = isAdmin || isApprovedMember || guestAccess;
@@ -1477,7 +1492,7 @@ export default function Experience() {
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
               <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
-              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side"><a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
+              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side">{canViewPhotoDocs && <a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a>}<div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => setSearch("")}>Clear search <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>RESPONSIBLE</th></tr></thead><tbody>
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
@@ -2522,9 +2537,11 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
     session,
     materials: dailyProgramFlowMaterials.filter((material) => (materialSession(material) || "Other sessions") === session),
   }));
+  const referenceMaterials = displayed.filter((material) => material.category === "References");
   const colorByCategory: Record<string, string> = { Guidelines: "resource-green", Presentation: "resource-yellow", References: "resource-blue", Worksheet: "resource-orange", "Program Flow": "resource-blue", "Communication Letter": "resource-orange" };
   const isPresentationMemberView = isRegularMember && category === "Presentation";
   const isProgramFlowView = category === "Program Flow";
+  const isReferencesView = category === "References";
   const isDailyFilteredView = isPresentationMemberView || isProgramFlowView;
 
   return <div className="content-wrap materials-page">
@@ -2594,11 +2611,133 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
         })}
         {!programFlowSessionGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Gathering program flows…" : selectedDailyDate ? "No sessions for this day." : "No program flow materials are available yet."}</h2><p>{loading ? "Session materials will appear here." : "When a program flow resource is shared for this day, you’ll find it here."}</p></div>}
       </div>
+    </section> : isReferencesView ? <section className="presentation-topic-library" aria-label="Reference materials">
+      <div className="presentation-topics-heading"><span className="eyebrow">MATERIAL</span><p>Expand a material to preview its files.</p></div>
+      <div className="presentation-topic-list">
+        {referenceMaterials.map((material) => {
+          const attachments = getMaterialAttachments(material);
+          const groupKey = `reference:${material.id}`;
+          const expanded = expandedResourceGroups.has(groupKey);
+          return <section className="presentation-topic-group" key={material.id}>
+            <button type="button" className="presentation-topic-toggle" aria-expanded={expanded} onClick={() => setExpandedResourceGroups((current) => {
+              const next = new Set(current);
+              if (next.has(groupKey)) next.delete(groupKey);
+              else next.add(groupKey);
+              return next;
+            })}>
+              <span className="presentation-topic-title"><strong>{material.name}</strong></span>
+              <span className="presentation-topic-count">{attachments.length} {attachments.length === 1 ? "file" : "files"}</span>
+              <ChevronDown size={18} className={expanded ? "presentation-topic-chevron presentation-topic-chevron--open" : "presentation-topic-chevron"} />
+            </button>
+            {expanded && <div className="reference-material-previews">{attachments.map((attachment, index) => {
+              const imagePreview = isImageAttachment(attachment);
+              const pdfPreview = isPdfAttachment(attachment);
+              return <article className="reference-material-preview" key={`${attachment.url}-${index}`}>
+                {imagePreview
+                  ? <div className="reference-material-image-wrap"><img src={attachment.url} alt={attachment.name || material.name} loading="lazy" /></div>
+                  : pdfPreview
+                    ? <ReferencePdfPreview attachment={attachment} materialName={material.name} />
+                    : <div className="reference-material-unavailable">This file type can’t be previewed here. Open it in a new tab or download it to view.</div>}
+              </article>;
+            })}</div>}
+          </section>;
+        })}
+        {!referenceMaterials.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">REFERENCES</span><h2>{loading ? "Gathering references…" : "No references are available yet."}</h2><p>{loading ? "Reference materials will appear here." : "When a reference is shared, you’ll find it here."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
+      </div>
     </section> : <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-files">{getMaterialAttachments(material).map((attachment, attachmentIndex) => <button type="button" key={`${attachment.url}-${attachmentIndex}`} onClick={() => onDownload(material, attachment)} title={attachment.name}><Download size={14} /><span>{attachment.name}</span></button>)}</div><div className="resource-card-foot"><span><span className="online-dot" />{isAdmin && material.enabled === false ? "Hidden from regular users" : "Available to all members"}</span></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
     </div>}
   </div>;
 }
+
+function ReferencePdfPreview({ attachment, materialName }: { attachment: MaterialFile; materialName: string }) {
+  const sourceUrl = materialPdfPreviewUrl(attachment);
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let loadingTask: PDFDocumentLoadingTask | null = null;
+    setPdfDocument(null);
+    setLoading(true);
+    setFailed(false);
+
+    async function loadPdf() {
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        if (!active) return;
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+        loadingTask = pdfjs.getDocument({ url: sourceUrl });
+        const document = await loadingTask.promise;
+        if (!active) {
+          await document.destroy();
+          return;
+        }
+        setPdfDocument(document);
+      } catch {
+        if (active) setFailed(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadPdf();
+    return () => {
+      active = false;
+      if (loadingTask) void loadingTask.destroy();
+    };
+  }, [sourceUrl]);
+
+  if (loading) return <div className="reference-material-pdf-status" role="status">Loading PDF pages…</div>;
+  if (failed || !pdfDocument) return <div className="reference-material-pdf-status" role="status">Couldn’t render this PDF. Open it in a new tab or download it to view.</div>;
+
+  return <div className="reference-material-pdf-pages" aria-label={`${materialName} pages`}>
+    {Array.from({ length: pdfDocument.numPages }, (_, index) => <ReferencePdfPage key={index + 1} pdfDocument={pdfDocument} pageNumber={index + 1} materialName={materialName} />)}
+  </div>;
+}
+
+function ReferencePdfPage({ pdfDocument, pageNumber, materialName }: { pdfDocument: PDFDocumentProxy; pageNumber: number; materialName: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let renderTask: RenderTask | null = null;
+
+    async function renderPage() {
+      try {
+        const page = await pdfDocument.getPage(pageNumber);
+        if (!active || !canvasRef.current) return;
+        const scale = 1.7;
+        const viewport = page.getViewport({ scale });
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+        const canvas = canvasRef.current;
+        canvas.width = Math.ceil(viewport.width * outputScale);
+        canvas.height = Math.ceil(viewport.height * outputScale);
+        renderTask = page.render({
+          canvas,
+          viewport,
+          transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
+          background: "#fff",
+        });
+        await renderTask.promise;
+      } catch (error) {
+        if (active && (error as { name?: string })?.name !== "RenderingCancelledException") setFailed(true);
+      }
+    }
+
+    void renderPage();
+    return () => {
+      active = false;
+      renderTask?.cancel();
+    };
+  }, [pdfDocument, pageNumber]);
+
+  if (failed) return <div className="reference-material-pdf-page-error">Page {pageNumber} could not be rendered.</div>;
+  return <canvas ref={canvasRef} className="reference-material-pdf-page" role="img" aria-label={`${materialName}, page ${pageNumber}`} />;
+}
+
 function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Material[]; onOpen: () => void; onDownload: (material: Material, attachment?: MaterialFile) => void }) {
   return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find program flows, communication letters, guides, and other materials shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span><ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item, getMaterialAttachments(item)[0])} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }

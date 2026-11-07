@@ -14,6 +14,7 @@ import {
   EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
+import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramKeynoteTopic, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
@@ -22,8 +23,6 @@ const categories: MaterialCategory[] = ["Guidelines", "Presentation", "Reference
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const START_ACCESS_CODE = "AEW2026";
 const GUEST_ACCESS_STORAGE_KEY = "aew-congress-guest-access";
-type BrowserBarcodeDetector = { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>> };
-type BrowserBarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
@@ -1750,19 +1749,12 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
   useEffect(() => {
     if (!scannerOpen) return;
     let active = true;
-    let animationFrame = 0;
-    let stream: MediaStream | undefined;
+    let controls: IScannerControls | undefined;
+    let resultHandled = false;
     const video = videoRef.current;
-    const Detector = (window as Window & { BarcodeDetector?: BrowserBarcodeDetectorConstructor }).BarcodeDetector;
-
-    if (!Detector) {
+    if (!video) {
       setScannerStarting(false);
-      setCameraError("QR scanning is unavailable in this browser. Enter the code manually instead.");
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia || !video) {
-      setScannerStarting(false);
-      setCameraError("A camera is unavailable here. Enter the code manually instead.");
+      setCameraError("The camera preview could not be opened. Enter the code manually instead.");
       return;
     }
 
@@ -1770,46 +1762,35 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
     setCameraError("");
     void (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" } } });
-        if (!active) { stream.getTracks().forEach((track) => track.stop()); return; }
-        video.srcObject = stream;
-        await video.play();
-        const detector = new Detector({ formats: ["qr_code"] });
+        const reader = new BrowserQRCodeReader();
+        const scannerControls = await reader.decodeFromVideoDevice(undefined, video, (result, _error, activeControls) => {
+          if (!active || !result || resultHandled) return;
+          resultHandled = true;
+          activeControls.stop();
+          const scannedCode = result.getText().trim();
+          setCode(scannedCode);
+          setScannerOpen(false);
+          if (scannedCode === START_ACCESS_CODE) onEnterRef.current();
+          else setError("This QR code is not valid for guest access. Enter the access code manually.");
+        });
+        controls = scannerControls;
+        if (!active) { scannerControls.stop(); return; }
         setScannerStarting(false);
-
-        const scanFrame = async () => {
-          if (!active) return;
-          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-            try {
-              const [result] = await detector.detect(video);
-              if (result?.rawValue) {
-                const scannedCode = result.rawValue.trim();
-                setCode(scannedCode);
-                setScannerOpen(false);
-                if (scannedCode === START_ACCESS_CODE) onEnterRef.current();
-                else setError("This QR code is not valid for guest access. Enter the access code manually.");
-                return;
-              }
-            } catch { /* Keep scanning while the camera delivers frames. */ }
-          }
-          if (active) animationFrame = window.requestAnimationFrame(() => { void scanFrame(); });
-        };
-
-        animationFrame = window.requestAnimationFrame(() => { void scanFrame(); });
       } catch (cameraError) {
         if (!active) return;
         setScannerStarting(false);
-        setCameraError(cameraError instanceof DOMException && cameraError.name === "NotAllowedError"
+        const cameraErrorName = cameraError instanceof Error ? cameraError.name : "";
+        setCameraError(cameraErrorName === "NotAllowedError" || cameraErrorName === "PermissionDeniedError"
           ? "Camera access was blocked. Allow camera access or enter the code manually."
-          : "Could not start the camera. Enter the code manually instead.");
+          : cameraErrorName === "NotFoundError" || cameraErrorName === "DevicesNotFoundError"
+            ? "No camera was found. Enter the code manually instead."
+            : "Could not start the camera. Enter the code manually instead.");
       }
     })();
 
     return () => {
       active = false;
-      window.cancelAnimationFrame(animationFrame);
-      stream?.getTracks().forEach((track) => track.stop());
-      if (video.srcObject === stream) video.srcObject = null;
+      controls?.stop();
     };
   }, [scannerOpen]);
 

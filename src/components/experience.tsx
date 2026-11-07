@@ -1119,12 +1119,12 @@ export default function Experience() {
     event.preventDefault();
     if (!user || !isAdmin) {
       setContestMechanicsModal(false);
-      setToast({ kind: "error", text: "Sign in with a verified admin account to add criteria for judging." });
+      setToast({ kind: "error", text: "Sign in with a verified admin account to add contest criteria." });
       return;
     }
     const form = new FormData(event.currentTarget);
     const program = programs.find((item) => item.id === String(form.get("programId")));
-    if (!program) { setToast({ kind: "error", text: "Choose a published program for these judging criteria." }); return; }
+    if (!program) { setToast({ kind: "error", text: "Choose a published program for these contest criteria." }); return; }
     const contest = String(form.get("contest")).trim().replace(/\s+/g, " ");
     const contestDate = String(form.get("contestDate") ?? "").trim();
     const timeStart = String(form.get("timeStart") ?? "").trim();
@@ -1161,7 +1161,7 @@ export default function Experience() {
           updates.slice(start, start + 450).forEach((entry) => batch.update(doc(db, entry.collectionName, entry.id), entry.data));
           await batch.commit();
         }
-        setToast({ kind: "success", text: `Judging criteria for ${contest} updated.` });
+        setToast({ kind: "success", text: `Contest criteria for ${contest} updated.` });
       } else {
         const programMechanics = await getDocs(query(collection(db, "contestMechanics"), where("programId", "==", program.id)));
         const matching = programMechanics.docs.find((entry) => String(entry.data().contest ?? "").trim().toLowerCase() === contest.toLowerCase());
@@ -1192,7 +1192,7 @@ export default function Experience() {
             });
           }
         });
-        setToast({ kind: "success", text: `Judging criteria added to ${contest}.` });
+        setToast({ kind: "success", text: `Contest criteria added to ${contest}.` });
       }
       setContestMechanicsModal(false);
       setEditingMechanics(null);
@@ -1283,7 +1283,7 @@ export default function Experience() {
       if (deleteTarget.kind === "program") {
         setToast({ kind: "success", text: "Program and its related content were deleted." });
       } else if (deleteTarget.kind === "mechanics") {
-        setToast({ kind: "success", text: "Judging criteria and associated contest joins were deleted." });
+        setToast({ kind: "success", text: "Contest criteria and associated joins were deleted." });
       } else if (deleteTarget.kind === "speaker") {
         setToast({ kind: "success", text: "Speaker profile deleted." });
       } else {
@@ -1305,7 +1305,7 @@ export default function Experience() {
   const navItems: { id: Section; label: string }[] = [
     ...(isApprovedMember ? [{ id: "programs" as Section, label: "Programs" }] : []),
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
-    ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Criteria for Judging" }] : []),
+    ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Criteria" }] : []),
     ...(isAdmin ? [{ id: "speakers" as Section, label: "Speakers" }] : signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage Content" }] : []),
     ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
@@ -1826,7 +1826,7 @@ function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditP
   const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
   return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> {backLabel}</button><div className="section-heading"><div><span className="eyebrow">ADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
     <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
-    <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Criteria for Judging</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No judging criteria have been added yet.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest Criteria</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest criteria have been added yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material), { enabled: material.enabled !== false, onToggle: () => onToggleMaterialVisibility(material) })}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
   </div></div>;
 }
@@ -1851,15 +1851,15 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
 
   return <>
     <div className="content-wrap dashboard-page contest-page">
-      <div className="section-heading contest-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Contest <span>& criteria for judging</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add criteria</button></div>
-      <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published criteria for judging</h2><p>View each contest's criteria and registered contestants.</p></div><div className="contest-panel-controls"><label className="contest-program-filter"><span>Program</span><select value={selectedProgramId} onChange={(event) => setSelectedProgramId(event.target.value)} aria-label="Filter contests by program"><option value="">All programs</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></label><span className="contest-count">{String(filteredMechanics.length).padStart(2, "0")} {filteredMechanics.length === 1 ? "CONTEST" : "CONTESTS"}</span></div></div>
+      <div className="section-heading contest-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Contest <span>Criteria</span></h2><p>Set contest criteria and review the members who joined each contest.</p></div><button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add Criteria</button></div>
+      <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">CONTEST DIRECTORY</span><h2>Published Contest Criteria</h2><p>Review each contest's criteria and registered contestants.</p></div><div className="contest-panel-controls"><label className="contest-program-filter"><span>Program</span><select value={selectedProgramId} onChange={(event) => setSelectedProgramId(event.target.value)} aria-label="Filter contests by program"><option value="">All programs</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></label><span className="contest-count">{String(filteredMechanics.length).padStart(2, "0")} {filteredMechanics.length === 1 ? "CONTEST" : "CONTESTS"}</span></div></div>
         <div className="approval-table-wrap"><table className="approval-table contest-table contest-table--directory"><thead><tr><th>CONTEST</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {filteredMechanics.map((item) => {
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
             return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => setViewingContestants(item)}><Eye size={15} />View</button></div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
-          {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading judging criteria…" : selectedProgramId ? "No judging criteria for this program" : "No judging criteria yet"}</strong><span>{loading ? "Saved contest criteria will appear here." : selectedProgramId ? "Add criteria for judging to this program's contests to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding judging criteria."}</span></td></tr>}
-        </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit judging criteria.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
+          {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest criteria…" : selectedProgramId ? "No contest criteria for this program" : "No contest criteria yet"}</strong><span>{loading ? "Saved contest criteria will appear here." : selectedProgramId ? "Add contest criteria for this program's contests to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest criteria."}</span></td></tr>}
+        </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest criteria.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
       </section>
     </div>
     {viewingContestants && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !confirmingJoinId) setViewingContestants(null); }}><section className="form-modal contestants-modal" role="dialog" aria-modal="true" aria-labelledby="contestants-modal-title"><div className="form-modal-head"><div><span className="eyebrow">CONTESTANTS</span><h2 id="contestants-modal-title">{viewingContestants.contest}<span>.</span></h2><p>{viewingContestants.eventTitle} · {dateRange(viewingContestants.dateFrom, viewingContestants.dateTo)}</p></div><button className="modal-close modal-close--inline" onClick={() => !confirmingJoinId && setViewingContestants(null)} aria-label="Close contestants list"><X size={19} /></button></div><div className="contestants-table-wrap"><table className="approval-table contestants-table"><thead><tr><th>NAME</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>STATUS / CONFIRM</th></tr></thead><tbody>{contestantsLoading ? <tr><td colSpan={5} className="empty-table">Loading contestants…</td></tr> : sortedJoins.length ? sortedJoins.map((join) => {
@@ -1878,9 +1878,9 @@ function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatu
   const displayedContests = contests.filter((contest) => !selectedProgramId || contest.programId === selectedProgramId).slice().sort(compareContestSchedule);
   const selectedContest = displayedContests.find((contest) => contest.id === selectedContestId);
   return <div className="content-wrap dashboard-page contest-page">
-    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review their criteria for judging, and join when you’re ready.</p></div><span className="contest-count">{String(displayedContests.length).padStart(2, "0")} {displayedContests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
+    <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review contest criteria, and join when you’re ready.</p></div><span className="contest-count">{String(displayedContests.length).padStart(2, "0")} {displayedContests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
     <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div><ProgramFilterDropdown id="member-contest-program-filter" programs={programs} value={selectedProgramId} className="contest-member-filter" onChange={(programId) => { setSelectedProgramId(programId); setSelectedContestId(""); }} /></div>
-      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>CONTEST DATE/TIME</th><th>CONTEST</th><th>JOIN</th><th>CRITERIA FOR JUDGING</th></tr></thead><tbody>
+      <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>CONTEST DATE/TIME</th><th>CONTEST</th><th>JOIN</th><th>CONTEST CRITERIA</th></tr></thead><tbody>
         {displayedContests.map((contest) => {
           const joined = joinedContestIds.includes(contest.id);
           const qualified = joinedContestStatuses[contest.id] === "Qualified Contestant";
@@ -1889,7 +1889,7 @@ function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatu
         {!displayedContests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : selectedProgramId ? "No contests for this program yet" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : selectedProgramId ? "Choose another program or check back when a contest is announced." : "Check back when a program contest is announced."}</span></td></tr>}
       </tbody></table></div>
     </section>
-    {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>criteria for judging</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
+    {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>criteria</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
   </div>;
 }
 
@@ -1899,14 +1899,14 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit criteria for judging" : "Add criteria for judging"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit criteria for judging" : "Add criteria for judging"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest criteria" : "Add contest criteria"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest criteria" : "Add contest criteria"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <Field label="Program"><select name="programId" required defaultValue={initialMechanics?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
     <Field label="Contest"><input name="contest" defaultValue={initialMechanics?.contest ?? ""} placeholder="e.g. Agri-innovation showcase" required /></Field>
     <div className="contest-schedule-fields"><Field label="Contest Date"><input type="date" name="contestDate" defaultValue={initialMechanics?.contestDate ?? ""} required /></Field><Field label="Time Start"><input type="time" name="timeStart" defaultValue={initialMechanics?.timeStart ?? ""} required /></Field></div>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
     <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>
-    {programs.length === 0 && <p className="form-hint">Publish a program before adding its judging criteria.</p>}
+    {programs.length === 0 && <p className="form-hint">Publish a program before adding contest criteria.</p>}
     <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">{initialMechanics ? "Save changes" : "Save criteria"} <ArrowRight size={16} /></button></div>
   </form></div></div>;
 }
@@ -2200,9 +2200,9 @@ function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
 }
 
 function DeleteConfirmModal({ target, busy, onClose, onConfirm }: { target: DeleteTarget; busy: boolean; onClose: () => void; onConfirm: () => void }) {
-  const title = target.kind === "mechanics" ? "contest judging criteria" : target.kind === "speaker" ? "speaker profile" : target.kind;
+  const title = target.kind === "mechanics" ? "contest criteria" : target.kind === "speaker" ? "speaker profile" : target.kind;
   const detail = target.kind === "program"
-    ? "This also removes its contest judging criteria, linked materials, speakers, and contest join records."
+    ? "This also removes its contest criteria, linked materials, speakers, and contest join records."
     : target.kind === "mechanics"
       ? "Associated member join records will also be removed."
       : target.kind === "speaker" ? "This removes the profile from the speaker directory." : "This removes the material record from the resource library.";

@@ -114,6 +114,7 @@ export type SpeakerProfileCard = {
   imageUrl: string;
   imageKey: string;
   name: string;
+  postNominal?: string;
   designation: string;
   office: string;
   affiliations: SpeakerAffiliation[];

@@ -292,7 +292,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .speaker-editor { width: min(780px, 100%); }
 .speaker-editor .form-modal-head { margin-bottom: 2px; }
 .speaker-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 17px 0 8px; }
-.speaker-editor-grid .field:nth-child(3) { grid-column: 1 / -1; }
+.speaker-name-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .35fr); gap: 12px; }
 .speaker-editor .field-control > input, .speaker-editor .field-control > select { height: 39px; }
 .speaker-image-field { min-width: 0; }
 .speaker-image-field .file-picker { height: 39px; min-height: 39px; padding: 0 10px; }
@@ -440,7 +440,7 @@ img { -webkit-user-drag: none; user-select: none; }
   .speaker-profile-photo { height: 390px; flex-basis: 390px; }
   .speaker-editor { padding: 20px 16px; }
   .speaker-editor-grid { grid-template-columns: 1fr; gap: 9px; }
-  .speaker-editor-grid .field:nth-child(3) { grid-column: auto; }
+  .speaker-name-row { grid-column: auto; grid-template-columns: minmax(0, 1fr) minmax(105px, .42fr); gap: 9px; }
   .contest-editor { width: min(100%, 680px); padding: 20px 16px; }
   .criteria-editor-heading { align-items: flex-start; }
   .criteria-editor-heading .text-action { white-space: nowrap; }

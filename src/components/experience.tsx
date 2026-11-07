@@ -913,6 +913,7 @@ export default function Experience() {
     const program = programs.find((item) => item.id === String(form.get("programId")));
     if (!program) { setToast({ kind: "error", text: "Choose a saved program for this speaker." }); return; }
     const name = String(form.get("name") ?? "").trim().replace(/\s+/g, " ");
+    const postNominal = String(form.get("postNominal") ?? "").trim();
     const designation = String(form.get("designation") ?? "").trim();
     const office = String(form.get("office") ?? "").trim();
     let affiliations: SpeakerAffiliation[] = [];
@@ -955,7 +956,7 @@ export default function Experience() {
     if (!imageUrl) { setToast({ kind: "error", text: "Upload a profile image before saving this speaker." }); return; }
 
     try {
-      const payload = { programId: program.id, imageUrl, imageKey, name, designation, office, affiliations, topics, updatedAt: serverTimestamp() };
+      const payload = { programId: program.id, imageUrl, imageKey, name, postNominal, designation, office, affiliations, topics, updatedAt: serverTimestamp() };
       if (editingSpeaker) {
         await updateDoc(doc(db, "speakers", editingSpeaker.id), payload);
       } else {
@@ -1335,11 +1336,12 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
     </div>
     <div className="speakers-count-row"><span>{String(displayed.length).padStart(2, "0")} SPEAKERS</span><i /> <span>{programFilter ? programsById.get(programFilter)?.eventTitle : "CARAGA REGION XIII"}</span></div>
     <div className="speaker-card-grid">{displayed.map((speaker, index) => {
+      const displayName = `${speaker.name.toLocaleUpperCase()}${speaker.postNominal?.trim() ? `, ${speaker.postNominal.trim()}` : ""}`;
       return <article className="speaker-profile-card" key={speaker.id} style={{ animationDelay: `${index * 45}ms` }}>
         <div className="speaker-profile-photo">
           <img src={speaker.imageUrl} alt={`${speaker.name} profile`} loading="lazy" />
           {isAdmin && <div className="speaker-profile-actions"><button type="button" aria-label={`Edit ${speaker.name}`} title="Edit profile" onClick={() => onEdit(speaker)}><Pencil size={15} /></button><button type="button" aria-label={`Delete ${speaker.name}`} title="Delete profile" onClick={() => onDelete(speaker)}><Trash2 size={15} /></button></div>}
-          <div className="speaker-profile-title"><span className="eyebrow">CONGRESS SPEAKER</span><h3 title={speaker.name}>{speaker.name.toLocaleUpperCase()}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
+          <div className="speaker-profile-title"><span className="eyebrow">CONGRESS SPEAKER</span><h3 title={displayName}>{displayName}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
         </div>
         <div className="speaker-profile-details">
           {!!speaker.affiliations?.length && <section className="speaker-detail-section"><div className="speaker-affiliations">{speaker.affiliations.map((item, positionIndex) => <p key={`${item.position}-${item.organization}-${positionIndex}`}><strong>{item.position}</strong><i />{item.organization}</p>)}</div></section>}
@@ -1764,7 +1766,7 @@ function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
       <div className="speaker-editor-grid">
         <Field label="Program"><select name="programId" required defaultValue={initialSpeaker?.programId ?? ""}><option value="" disabled>Select a saved program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></Field>
         <label className="field speaker-image-field"><span className="field-label">Upload an image</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedImageName || (initialSpeaker ? "Replace profile photo" : "Choose a profile photo")}</strong><small>{selectedImageName ? "Ready to upload" : "JPG, PNG, or WebP · up to 8 MB"}</small></span><input type="file" name="speakerImage" accept="image/jpeg,image/png,image/webp" onChange={(event) => setSelectedImageName(event.target.files?.[0]?.name ?? "")} /></span>{initialSpeaker && !selectedImageName && <span className="speaker-image-current"><img src={initialSpeaker.imageUrl} alt="Current speaker profile" /><span>Current image is kept unless you choose a replacement.</span></span>}</label>
-        <Field label="Name"><input name="name" defaultValue={initialSpeaker?.name ?? ""} placeholder="Speaker name" autoComplete="name" required /></Field>
+        <div className="speaker-name-row"><Field label="Name"><input name="name" defaultValue={initialSpeaker?.name ?? ""} placeholder="Speaker name" autoComplete="name" required /></Field><Field label="Post Nominal"><input name="postNominal" defaultValue={initialSpeaker?.postNominal ?? ""} placeholder="e.g. PhD." /></Field></div>
         <Field label="Designation"><input name="designation" defaultValue={initialSpeaker?.designation ?? ""} placeholder="e.g. Regional Director" required /></Field>
         <Field label="Office"><input name="office" defaultValue={initialSpeaker?.office ?? ""} placeholder="e.g. DA-RFO XIII" required /></Field>
       </div>

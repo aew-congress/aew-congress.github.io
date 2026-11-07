@@ -1317,7 +1317,7 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
 
   return <div className="content-wrap dashboard-page speakers-page">
     <div className="section-heading speakers-heading">
-      <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know thy <span>Speakers</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
+      <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know the <span>Speakers</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
       <div className="speakers-controls">
         <div className="speakers-program-filter" ref={programFilterRef}>
           <span id="speaker-program-filter-label">Program</span>

@@ -1341,10 +1341,10 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
           <img src={speaker.imageUrl} alt={`${speaker.name} profile`} loading="lazy" />
           <span className="speaker-profile-program">{program?.eventTitle ?? "AEW Congress"}</span>
           {isAdmin && <div className="speaker-profile-actions"><button type="button" aria-label={`Edit ${speaker.name}`} title="Edit profile" onClick={() => onEdit(speaker)}><Pencil size={15} /></button><button type="button" aria-label={`Delete ${speaker.name}`} title="Delete profile" onClick={() => onDelete(speaker)}><Trash2 size={15} /></button></div>}
-          <div className="speaker-profile-title"><span className="eyebrow">CONGRESS SPEAKER</span><h3>{speaker.name.toLocaleUpperCase()}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
+          <div className="speaker-profile-title"><span className="eyebrow">CONGRESS SPEAKER</span><h3 title={speaker.name}>{speaker.name.toLocaleUpperCase()}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
         </div>
         <div className="speaker-profile-details">
-          {!!speaker.affiliations?.length && <section className="speaker-detail-section"><span>POSITION & ORGANIZATION</span><div className="speaker-affiliations">{speaker.affiliations.map((item, positionIndex) => <p key={`${item.position}-${item.organization}-${positionIndex}`}><strong>{item.position}</strong><i />{item.organization}</p>)}</div></section>}
+          {!!speaker.affiliations?.length && <section className="speaker-detail-section"><div className="speaker-affiliations">{speaker.affiliations.map((item, positionIndex) => <p key={`${item.position}-${item.organization}-${positionIndex}`}><strong>{item.position}</strong><i />{item.organization}</p>)}</div></section>}
           {!!speaker.topics?.length && <section className="speaker-detail-section speaker-topics-section"><span>TOPICS</span><div className="speaker-topic-list">{speaker.topics.map((topic, topicIndex) => <span key={`${topic}-${topicIndex}`}>{topic}</span>)}</div></section>}
         </div>
       </article>;

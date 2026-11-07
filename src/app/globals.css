@@ -978,3 +978,12 @@ img { -webkit-user-drag: none; user-select: none; }
   .landing-hero-copy > h1, .landing-hero-details { grid-column: 1; grid-row: auto; }
   .landing-hero-details { margin-top: 18px; }
 }
+.photo-docs-button { height: 35px; padding-inline: 12px; border: 1px solid #dfe7d2; border-radius: 8px; color: var(--olive); background: #fff; gap: 7px; font-size: 11px; white-space: nowrap; text-decoration: none; }
+.photo-docs-button:hover { border-color: #cbd8b8; background: #f5f8ef; box-shadow: 0 3px 9px #455e1510; }
+.schedule-title-row { align-items: stretch; }
+.schedule-title-side { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.schedule-title-side .photo-docs-button { position: relative; top: -15px; }
+@media (max-width: 760px) {
+  .schedule-title-row { align-items: flex-start; }
+  .schedule-title-side { width: 100%; align-items: flex-end; }
+}

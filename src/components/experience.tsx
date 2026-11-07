@@ -1762,8 +1762,9 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
     setCameraError("");
     void (async () => {
       try {
-        const reader = new BrowserQRCodeReader();
-        const scannerControls = await reader.decodeFromVideoDevice(undefined, video, (result, _error, activeControls) => {
+        // Use ZXing's QR-only reader so barcodes and other formats are ignored.
+        const qrReader = new BrowserQRCodeReader();
+        const scannerControls = await qrReader.decodeFromVideoDevice(undefined, video, (result, _error, activeControls) => {
           if (!active || !result || resultHandled) return;
           resultHandled = true;
           activeControls.stop();
@@ -1807,8 +1808,8 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
     <section className="form-modal start-access-modal" role="dialog" aria-modal="true" aria-labelledby="start-access-title">
       <div className="form-modal-head"><div><span className="eyebrow">AEW CONGRESS 2026</span><h2 id="start-access-title">Start browsing.</h2><p>Enter the access code to explore the congress as a guest.</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       <form onSubmit={submit}>
-        <Field label="Access code" icon={<LockKeyhole size={15} />}><span className="start-access-code-control"><input autoFocus type="password" autoComplete="off" value={code} onChange={(event) => { setCode(event.target.value); setError(""); }} placeholder="Enter access code" required aria-invalid={Boolean(error)} aria-describedby={error ? "start-access-error" : undefined} /><button className="start-access-scan-button" type="button" onClick={() => { setCameraError(""); setScannerOpen((open) => !open); }} aria-label={scannerOpen ? "Close QR scanner" : "Scan QR code"} title={scannerOpen ? "Close QR scanner" : "Scan QR code"}><QrCode size={19} /></button></span></Field>
-        {scannerOpen && <div className="start-access-scanner" aria-live="polite"><video ref={videoRef} playsInline muted aria-label="Camera view for QR code scanning" />{scannerStarting && <span className="start-access-scanner-status">Starting camera…</span>}{cameraError && <span className="start-access-scanner-error" role="alert">{cameraError}</span>}{!scannerStarting && !cameraError && <span className="start-access-scanner-status">Point the camera at the AEW guest access QR code.</span>}<button type="button" className="start-access-stop-scan" onClick={() => setScannerOpen(false)}>Close scanner</button></div>}
+        <Field label="Access code" icon={<LockKeyhole size={15} />}><span className="start-access-code-control"><input autoFocus type="password" autoComplete="off" value={code} onChange={(event) => { setCode(event.target.value); setError(""); }} placeholder="Enter access code" required aria-invalid={Boolean(error)} aria-describedby={error ? "start-access-error" : undefined} /><button className="start-access-scan-button" type="button" onClick={() => { setCameraError(""); setScannerOpen((open) => !open); }} aria-label={scannerOpen ? "Close QR-only scanner" : "Scan QR code only"} title={scannerOpen ? "Close QR-only scanner" : "Scan QR code only"}><QrCode size={19} /></button></span></Field>
+        {scannerOpen && <div className="start-access-scanner" aria-live="polite"><video ref={videoRef} playsInline muted aria-label="QR code only camera scanner" />{scannerStarting && <span className="start-access-scanner-status">Starting camera…</span>}{cameraError && <span className="start-access-scanner-error" role="alert">{cameraError}</span>}{!scannerStarting && !cameraError && <span className="start-access-scanner-status">QR codes only. Point the camera at the AEW guest access QR code.</span>}<button type="button" className="start-access-stop-scan" onClick={() => setScannerOpen(false)}>Close scanner</button></div>}
         {error && <p className="start-access-error" id="start-access-error" role="alert">{error}</p>}
         <div className="form-modal-actions"><button className="button button--soft" type="button" onClick={onClose}>Cancel</button><button className="button button--olive" type="submit">Enter <ArrowRight size={15} /></button></div>
       </form>

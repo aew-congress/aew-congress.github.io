@@ -9,12 +9,13 @@ import {
   sendPasswordResetEmail, signInWithEmailAndPassword, signOut, User,
 } from "firebase/auth";
 import {
-  ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
+  AlignCenter, AlignLeft, AlignRight, ArrowRight, ArrowUpRight, BadgeCheck, Bold, CalendarDays, Check, Code2,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
-  EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
+  EyeOff, FileCheck2, FileText, Filter, ImagePlus, Italic, Link2, List, ListOrdered, LockKeyhole, LogOut, Mail, MapPin,
+  Menu, Maximize2, Minimize2, Pencil, Plus, Printer, QrCode, Redo2, Search, ShieldCheck, Sparkles, Strikethrough, Trash2, Underline, Undo2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
+import sanitizeHtml from "sanitize-html";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramKeynoteTopic, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
@@ -23,9 +24,30 @@ const categories: MaterialCategory[] = ["Guidelines", "Presentation", "Reference
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const START_ACCESS_CODE = "aew2026";
 const GUEST_ACCESS_STORAGE_KEY = "aew-congress-guest-access";
+const contestMechanicsSanitizeOptions: sanitizeHtml.IOptions = {
+  allowedTags: ["a", "b", "blockquote", "br", "div", "em", "font", "h1", "h2", "h3", "h4", "hr", "i", "img", "li", "ol", "p", "s", "span", "strike", "strong", "sub", "sup", "u", "ul"],
+  allowedAttributes: { "*": ["style"], a: ["href", "rel", "target", "title"], font: ["color", "face", "size"], img: ["alt", "height", "src", "title", "width"] },
+  allowedStyles: { "*": {
+    "background-color": [/^(#[\da-f]{3,8}|[a-z]{1,20}|rgba?\([\d.,%\s]+\))$/i],
+    "color": [/^(#[\da-f]{3,8}|[a-z]{1,20}|rgba?\([\d.,%\s]+\))$/i],
+    "font-family": [/^[\w\s,'"-]{1,80}$/],
+    "font-size": [/^(\d+(\.\d+)?(px|pt|em|rem|%)|xx-small|x-small|small|medium|large|x-large|xx-large)$/i],
+    "font-style": [/^(normal|italic|oblique)$/],
+    "font-weight": [/^(normal|bold|[1-9]00)$/],
+    "text-align": [/^(left|right|center|justify)$/],
+    "text-decoration": [/^(none|underline|line-through)$/],
+  } },
+  allowedSchemes: ["http", "https", "mailto"],
+  allowProtocolRelative: false,
+  transformTags: { a: (_tagName, attribs) => ({ tagName: "a", attribs: { ...attribs, rel: "noopener noreferrer", target: "_blank" } }) },
+};
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
+
+function sanitizeContestMechanicsHtml(value: string) {
+  return sanitizeHtml(value, contestMechanicsSanitizeOptions).trim();
+}
 
 function displayDate(date: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }) {
   if (!date) return "Date to be announced";
@@ -1194,6 +1216,7 @@ export default function Experience() {
     const contest = String(form.get("contest")).trim().replace(/\s+/g, " ");
     const contestDate = String(form.get("contestDate") ?? "").trim();
     const timeStart = String(form.get("timeStart") ?? "").trim();
+    const mechanicsHtml = sanitizeContestMechanicsHtml(String(form.get("mechanicsHtml") ?? ""));
     let criteria: Array<{ criteria: string; description: string; weight: number }>;
     try {
       const rows = JSON.parse(String(form.get("criteriaRows"))) as Array<{ criteria?: unknown; description?: unknown; weight?: unknown }>;
@@ -1219,7 +1242,7 @@ export default function Experience() {
       if (editingMechanics) {
         const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
         const updates = [
-          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, updatedAt: serverTimestamp() } },
+          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, mechanicsHtml, updatedAt: serverTimestamp() } },
           ...joins.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id, data: { programId: program.id, contest, updatedAt: serverTimestamp() } })),
         ];
         for (let start = 0; start < updates.length; start += 450) {
@@ -1238,6 +1261,7 @@ export default function Experience() {
             const current = existing.data() as ContestMechanics;
             transaction.update(mechanicsRef, {
               criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
+              mechanicsHtml: mechanicsHtml || current.mechanicsHtml || "",
               contestDate,
               timeStart,
               updatedAt: serverTimestamp(),
@@ -1253,6 +1277,7 @@ export default function Experience() {
               contestDate,
               timeStart,
               criteria,
+              mechanicsHtml,
               createdAt: serverTimestamp(),
               createdBy: adminUser.uid,
             });
@@ -2159,6 +2184,27 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
     </section>
   </div>;
 }
+function ContestCriteriaModal({ contest, onClose }: { contest: ContestMechanics; onClose: () => void }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+    <section className="form-modal contest-criteria-modal" role="dialog" aria-modal="true" aria-labelledby="contest-criteria-title">
+      <div className="form-modal-head"><div><span className="eyebrow">{contest.eventTitle}</span><h2 id="contest-criteria-title">{contest.contest}<span> criteria</span></h2><p>{dateRange(contest.dateFrom, contest.dateTo)} · {contest.venue}</p></div><button className="modal-close modal-close--inline" type="button" onClick={onClose} aria-label="Close contest criteria"><X size={19} /></button></div>
+      <div className="contest-criteria-panels">
+        <section className="contest-criteria-panel" aria-labelledby="contest-criteria-panel-title">
+          <span className="eyebrow" id="contest-criteria-panel-title">CRITERIA</span>
+          <div className="approval-table-wrap contest-criteria-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(contest.criteria ?? []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}{!contest.criteria?.length && <tr><td colSpan={3} className="contest-criteria-empty">No criteria have been added to this contest yet.</td></tr>}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(contest.criteria)}%</strong></td></tr></tbody></table></div>
+        </section>
+        <section className="contest-mechanics-panel" aria-labelledby="contest-mechanics-panel-title">
+          <span className="eyebrow" id="contest-mechanics-panel-title">MECHANICS</span>
+          {contest.mechanicsHtml?.trim()
+            ? <div className="contest-mechanics-rich-content" dangerouslySetInnerHTML={{ __html: sanitizeContestMechanicsHtml(contest.mechanicsHtml) }} />
+            : <p className="contest-mechanics-empty">No mechanics have been added to this contest yet.</p>}
+        </section>
+      </div>
+      <div className="form-modal-actions"><button className="button button--soft" type="button" onClick={onClose}>Close</button></div>
+    </section>
+  </div>;
+}
+
 function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatuses, joiningContestId, loading, canJoin, canJudge, judgeUid, onJoin }: {
   contests: ContestMechanics[]; programs: Program[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; canJoin: boolean; canJudge: boolean; judgeUid: string; onJoin: (contest: ContestMechanics) => void;
 }) {
@@ -2175,12 +2221,12 @@ function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatu
         {displayedContests.map((contest) => {
           const joined = joinedContestIds.includes(contest.id);
           const qualified = joinedContestStatuses[contest.id] === "Qualified Contestant";
-          return <tr key={contest.id}><td><strong className="table-primary">{contest.contestDate ? displayDate(contest.contestDate) : "Date to be announced"}</strong><small className="table-muted">{contest.timeStart ? formatTimeValue(contest.timeStart) : "Time to be announced"}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td>{canJoin ? <button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button> : <span className="contest-join-unavailable">—</span>}</td><td><div className="contest-row-actions"><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => { setSelectedJudgeContestId(""); setSelectedContestId((current) => current === contest.id ? "" : contest.id); }}>{selectedContestId === contest.id ? "Hide criteria" : "View criteria"}<ArrowUpRight size={14} /></button>{canJudge && <button className="contest-judge" aria-expanded={selectedJudgeContestId === contest.id} onClick={() => { setSelectedContestId(""); setSelectedJudgeContestId((current) => current === contest.id ? "" : contest.id); }}>{selectedJudgeContestId === contest.id ? "Close score sheet" : "Judge"}</button>}</div></td></tr>;
+          return <tr key={contest.id}><td><strong className="table-primary">{contest.contestDate ? displayDate(contest.contestDate) : "Date to be announced"}</strong><small className="table-muted">{contest.timeStart ? formatTimeValue(contest.timeStart) : "Time to be announced"}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td>{canJoin ? <button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button> : <span className="contest-join-unavailable">—</span>}</td><td><div className="contest-row-actions"><button className="contest-view" aria-haspopup="dialog" onClick={() => { setSelectedJudgeContestId(""); setSelectedContestId(contest.id); }}>View criteria<ArrowUpRight size={14} /></button>{canJudge && <button className="contest-judge" aria-expanded={selectedJudgeContestId === contest.id} onClick={() => { setSelectedContestId(""); setSelectedJudgeContestId((current) => current === contest.id ? "" : contest.id); }}>{selectedJudgeContestId === contest.id ? "Close score sheet" : "Judge"}</button>}</div></td></tr>;
         })}
         {!displayedContests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : selectedProgramId ? "No contests for this program yet" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : selectedProgramId ? "Choose another program or check back when a contest is announced." : "Check back when a program contest is announced."}</span></td></tr>}
       </tbody></table></div>
     </section>
-    {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>criteria</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
+    {selectedContest && <ContestCriteriaModal contest={selectedContest} onClose={() => setSelectedContestId("")} />}
     {selectedJudgeContest && <JudgeScoreSheet key={`${selectedJudgeContest.id}-${judgeUid}`} contest={selectedJudgeContest} judgeUid={judgeUid} onClose={() => setSelectedJudgeContestId("")} />}
   </div>;
 }
@@ -2276,8 +2322,142 @@ function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMecha
     </section>
   </div>;
 }
+function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+  const [sourceMode, setSourceMode] = useState(false);
+  const [sourceValue, setSourceValue] = useState("");
+  const [fullScreen, setFullScreen] = useState(false);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!sourceMode && editor) {
+      const safeHtml = sanitizeContestMechanicsHtml(value);
+      if (editor.innerHTML !== safeHtml) editor.innerHTML = safeHtml;
+    }
+  }, [sourceMode, value]);
+
+  function syncEditor() {
+    onChange(editorRef.current?.innerHTML ?? "");
+  }
+
+  function preserveSelection() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (editor && range && editor.contains(range.commonAncestorContainer)) savedRangeRef.current = range.cloneRange();
+  }
+
+  function runCommand(command: string, commandValue?: string) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    const savedRange = savedRangeRef.current;
+    if (savedRange && editor.contains(savedRange.commonAncestorContainer)) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(savedRange);
+    }
+    document.execCommand(command, false, commandValue);
+    savedRangeRef.current = null;
+    syncEditor();
+  }
+
+  function insertLink() {
+    const url = window.prompt("Enter a link URL (https:// or mailto:)")?.trim();
+    if (!url) return;
+    if (!/^(https?:\/\/|mailto:)/i.test(url)) {
+      window.alert("Enter a link that starts with https://, http://, or mailto:.");
+      return;
+    }
+    runCommand("createLink", url);
+  }
+
+  function insertImage() {
+    const url = window.prompt("Enter an image URL (https://)")?.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      window.alert("Images must use an http:// or https:// URL.");
+      return;
+    }
+    runCommand("insertImage", url);
+  }
+
+  function toggleSourceMode() {
+    if (!sourceMode) {
+      setSourceValue(editorRef.current?.innerHTML ?? value);
+      setSourceMode(true);
+      return;
+    }
+    const safeHtml = sanitizeContestMechanicsHtml(sourceValue);
+    onChange(safeHtml);
+    setSourceValue(safeHtml);
+    setSourceMode(false);
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const clipboardHtml = event.clipboardData.getData("text/html");
+    const clipboardText = event.clipboardData.getData("text/plain");
+    const pastedHtml = clipboardHtml
+      ? sanitizeContestMechanicsHtml(clipboardHtml)
+      : clipboardText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\r?\n/g, "<br>");
+    runCommand("insertHTML", pastedHtml);
+  }
+
+  function toolButton(label: string, icon: React.ReactNode, command: string, commandValue?: string) {
+    return <button type="button" className="rich-text-tool-button" aria-label={label} title={label} disabled={sourceMode} onMouseDown={(event) => { preserveSelection(); event.preventDefault(); }} onClick={() => runCommand(command, commandValue)}>{icon}</button>;
+  }
+
+  return <div className={`rich-text-editor${fullScreen ? " rich-text-editor--fullscreen" : ""}`}>
+    <div className="rich-text-toolbar" role="toolbar" aria-label="Contest mechanics formatting">
+      <div className="rich-text-toolbar-group">
+        {toolButton("Bold", <Bold size={17} />, "bold")}
+        {toolButton("Italic", <Italic size={17} />, "italic")}
+        {toolButton("Underline", <Underline size={17} />, "underline")}
+        {toolButton("Strikethrough", <Strikethrough size={17} />, "strikeThrough")}
+        {toolButton("Subscript", <span aria-hidden="true">x₂</span>, "subscript")}
+        {toolButton("Superscript", <span aria-hidden="true">x²</span>, "superscript")}
+      </div>
+      <label className="rich-text-format-select rich-text-format-select--font"><span className="visually-hidden">Font family</span><select aria-label="Font family" disabled={sourceMode} defaultValue="" onMouseDown={preserveSelection} onChange={(event) => { if (event.target.value) runCommand("fontName", event.target.value); event.target.value = ""; }}><option value="">Font</option><option value="Arial">Arial</option><option value="Georgia">Georgia</option><option value="'Segoe UI'">Segoe UI</option><option value="'Times New Roman'">Times New Roman</option><option value="Verdana">Verdana</option></select></label>
+      <label className="rich-text-format-select rich-text-format-select--size"><span className="visually-hidden">Font size</span><select aria-label="Font size" disabled={sourceMode} defaultValue="" onMouseDown={preserveSelection} onChange={(event) => { if (event.target.value) runCommand("fontSize", event.target.value); event.target.value = ""; }}><option value="">Size</option><option value="2">Small</option><option value="3">12 pt</option><option value="4">Large</option><option value="5">18 pt</option><option value="6">24 pt</option><option value="7">36 pt</option></select></label>
+      <div className="rich-text-toolbar-group">
+        <label className="rich-text-color-picker" title="Text color"><span aria-hidden="true">A</span><input type="color" aria-label="Text color" disabled={sourceMode} defaultValue="#303629" onMouseDown={preserveSelection} onChange={(event) => runCommand("foreColor", event.target.value)} /></label>
+        <label className="rich-text-color-picker rich-text-color-picker--highlight" title="Highlight color"><span aria-hidden="true">▰</span><input type="color" aria-label="Highlight color" disabled={sourceMode} defaultValue="#fff1a6" onMouseDown={preserveSelection} onChange={(event) => runCommand("hiliteColor", event.target.value)} /></label>
+      </div>
+      <label className="rich-text-format-select"><span className="visually-hidden">Text style</span><select aria-label="Text style" disabled={sourceMode} defaultValue="" onMouseDown={preserveSelection} onChange={(event) => { if (event.target.value) runCommand("formatBlock", event.target.value); event.target.value = ""; }}><option value="">Paragraph</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="blockquote">Quote</option></select></label>
+      <div className="rich-text-toolbar-group">
+        {toolButton("Align left", <AlignLeft size={17} />, "justifyLeft")}
+        {toolButton("Align center", <AlignCenter size={17} />, "justifyCenter")}
+        {toolButton("Align right", <AlignRight size={17} />, "justifyRight")}
+      </div>
+      <div className="rich-text-toolbar-group">
+        {toolButton("Numbered list", <ListOrdered size={17} />, "insertOrderedList")}
+        {toolButton("Bulleted list", <List size={17} />, "insertUnorderedList")}
+        {toolButton("Outdent", <span aria-hidden="true">⇤</span>, "outdent")}
+        {toolButton("Indent", <span aria-hidden="true">⇥</span>, "indent")}
+      </div>
+      <div className="rich-text-toolbar-group">
+        <button type="button" className="rich-text-tool-button" aria-label="Insert link" title="Insert link" disabled={sourceMode} onMouseDown={(event) => { preserveSelection(); event.preventDefault(); }} onClick={insertLink}><Link2 size={17} /></button>
+        <button type="button" className="rich-text-tool-button" aria-label="Insert image" title="Insert image from URL" disabled={sourceMode} onMouseDown={(event) => { preserveSelection(); event.preventDefault(); }} onClick={insertImage}><ImagePlus size={17} /></button>
+      </div>
+      <div className="rich-text-toolbar-group">
+        {toolButton("Undo", <Undo2 size={17} />, "undo")}
+        {toolButton("Redo", <Redo2 size={17} />, "redo")}
+        {toolButton("Clear formatting", <span aria-hidden="true">Tx</span>, "removeFormat")}
+        <button type="button" className={`rich-text-tool-button${sourceMode ? " rich-text-tool-button--active" : ""}`} aria-label="Toggle HTML source" title="Toggle HTML source" onClick={toggleSourceMode}><Code2 size={17} /></button>
+        <button type="button" className="rich-text-tool-button" aria-label={fullScreen ? "Exit full screen" : "Full screen editor"} title={fullScreen ? "Exit full screen" : "Full screen editor"} onClick={() => setFullScreen((current) => !current)}>{fullScreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+      </div>
+    </div>
+    {sourceMode
+      ? <textarea className="rich-text-source" aria-label="Mechanics HTML source" value={sourceValue} onChange={(event) => { setSourceValue(event.target.value); onChange(event.target.value); }} />
+      : <div ref={editorRef} className="rich-text-content" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="Contest mechanics rich text" data-placeholder="Write the contest mechanics and instructions…" onInput={syncEditor} onPaste={handlePaste} />}
+  </div>;
+}
+
 function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
+  const [mechanicsHtml, setMechanicsHtml] = useState(initialMechanics?.mechanicsHtml ?? "");
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
@@ -2289,6 +2469,11 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
     <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>
+    <input type="hidden" name="mechanicsHtml" value={mechanicsHtml} readOnly />
+    <section className="contest-mechanics-rich-text-section">
+      <div className="criteria-editor-heading"><div><span>CONTEST MECHANICS</span><small>Optional rules, instructions, and details for contestants.</small></div></div>
+      <ContestMechanicsRichTextEditor value={mechanicsHtml} onChange={setMechanicsHtml} />
+    </section>
     {programs.length === 0 && <p className="form-hint">Publish a program before adding contest criteria.</p>}
     <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">{initialMechanics ? "Save changes" : "Save criteria"} <ArrowRight size={16} /></button></div>
   </form></div></div>;

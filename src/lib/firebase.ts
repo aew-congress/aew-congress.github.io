@@ -84,6 +84,8 @@ export type ContestMechanics = {
   contestDate?: string;
   timeStart?: string;
   criteria: ContestCriterion[];
+  /** Optional contest instructions and rules stored as sanitized rich-text HTML. */
+  mechanicsHtml?: string;
   createdAt?: unknown;
   createdBy: string;
   updatedAt?: unknown;

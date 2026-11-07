@@ -98,7 +98,7 @@ export type AttendanceConfirmation = {
   confirmedAt?: unknown;
 };
 
-export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet";
+export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet" | "Program Flow" | "Communication Letter";
 export type Material = {
   id: string;
   programId: string;

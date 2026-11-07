@@ -896,7 +896,7 @@ export default function Experience() {
         category,
         name: name || url.split("/").pop() || "Program resource",
         url,
-        enabled: editingMaterial ? editingMaterial.enabled !== false : true,
+        enabled: editingMaterial ? editingMaterial.enabled !== false : false,
         updatedAt: serverTimestamp(),
       };
       if (editingMaterial) {

@@ -73,6 +73,7 @@ export type Program = {
 };
 
 export type ContestCriterion = { criteria: string; description: string; weight: number };
+export type ContestTeam = { id: string; name: string };
 export type ContestMechanics = {
   id: string;
   programId: string;
@@ -84,6 +85,8 @@ export type ContestMechanics = {
   contestDate?: string;
   timeStart?: string;
   criteria: ContestCriterion[];
+  /** Teams configured for judging this specific contest. */
+  teams?: ContestTeam[];
   /** Optional contest instructions and rules stored as sanitized rich-text HTML. */
   mechanicsHtml?: string;
   createdAt?: unknown;

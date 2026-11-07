@@ -507,15 +507,22 @@ img { -webkit-user-drag: none; user-select: none; }
 .contest-schedule-fields { grid-template-columns: minmax(220px, 1.35fr) minmax(180px, 1.1fr) minmax(145px, .8fr) minmax(145px, .8fr); }
 .criteria-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 19px 0 10px; padding: 12px 0 9px; border-top: 1px solid #e9ece5; color: #78816d; font-size: 11px; font-weight: 850; letter-spacing: .13em; }
 .criteria-editor-heading .text-action { font-size: 13px; letter-spacing: 0; }
-.criteria-editor-list { display: grid; gap: 9px; max-height: 350px; overflow-y: auto; padding: 1px 2px 2px; }
-.criteria-editor-row { display: grid; grid-template-columns: 25px minmax(170px, .9fr) minmax(260px, 1.6fr) minmax(105px, .5fr) 30px; gap: 10px; align-items: center; padding: 12px; border: 1px solid #e6eadf; border-radius: 11px; background: #fcfdfa; box-shadow: inset 1px 2px 4px #455e1504; }
+.criteria-editor-list { max-height: 350px; overflow: auto; border: 1px solid #e6eadf; border-radius: 11px; background: #fcfdfa; }
+.criteria-editor-table { width: 100%; min-width: 760px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.criteria-editor-table th { position: sticky; top: 0; z-index: 1; padding: 11px 10px; border-bottom: 1px solid #e4e8dd; background: #f6f8f1; color: #7b8471; text-align: left; font-size: 11px; font-weight: 750; }
+.criteria-editor-table th:first-child, .criteria-editor-table td:first-child { width: 48px; text-align: center; }
+.criteria-editor-table th:nth-child(2) { width: 28%; }
+.criteria-editor-table th:nth-child(4) { width: 130px; }
+.criteria-editor-table th:last-child, .criteria-editor-table td:last-child { width: 46px; text-align: center; }
+.criteria-editor-table td { padding: 9px 8px; border-bottom: 1px solid #e9ece5; vertical-align: middle; }
+.criteria-editor-table tbody tr:last-child td { border-bottom: 0; }
+.criteria-editor-table tbody tr:nth-child(even) { background: #fbfcf9; }
 .criteria-editor-number { color: #9ba58b; font-size: 12px; font-weight: 750; }
-.criteria-editor-row label { display: grid; min-width: 0; gap: 6px; color: #7b8471; font-size: 11px; font-weight: 700; }
-.criteria-editor-row input, .criteria-editor-row textarea { width: 100%; min-width: 0; border: 1px solid #e4e8dd; border-radius: 8px; padding: 9px 10px; outline: 0; background: white; color: #3e4734; font: inherit; font-size: 13px; line-height: 1.45; box-shadow: inset 1px 2px 4px #455e1504; }
-.criteria-editor-row input { height: 42px; }
-.criteria-editor-row textarea { min-height: 62px; resize: vertical; }
-.criteria-editor-row input:focus, .criteria-editor-row textarea:focus { border-color: #aeba99; box-shadow: 0 0 0 3px #455e1510; }
-.criteria-editor-row input::placeholder, .criteria-editor-row textarea::placeholder { color: #adb2a8; }
+.criteria-editor-table input, .criteria-editor-table textarea { display: block; width: 100%; min-width: 0; border: 1px solid #e4e8dd; border-radius: 8px; padding: 9px 10px; outline: 0; background: white; color: #3e4734; font: inherit; font-size: 13px; line-height: 1.45; box-shadow: inset 1px 2px 4px #455e1504; }
+.criteria-editor-table input { height: 42px; }
+.criteria-editor-table textarea { min-height: 62px; resize: vertical; }
+.criteria-editor-table input:focus, .criteria-editor-table textarea:focus { border-color: #aeba99; box-shadow: 0 0 0 3px #455e1510; }
+.criteria-editor-table input::placeholder, .criteria-editor-table textarea::placeholder { color: #adb2a8; }
 .contest-mechanics-rich-text-section { margin-top: 18px; }
 .contest-mechanics-rich-text-section .criteria-editor-heading { margin-bottom: 9px; }
 .contest-mechanics-rich-text-section .criteria-editor-heading > div { display: grid; gap: 5px; }
@@ -560,6 +567,20 @@ img { -webkit-user-drag: none; user-select: none; }
 .criteria-remove { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #919989; cursor: pointer; }
 .criteria-remove:not(:disabled):hover { color: #a55449; border-color: #f0ddd8; background: #fbefed; }
 .criteria-remove:disabled { cursor: default; opacity: .35; }
+.contest-team-editor { margin-top: 17px; }
+.contest-team-editor .criteria-editor-heading { margin-top: 0; }
+.contest-team-editor .criteria-editor-heading > div { display: grid; gap: 5px; }
+.contest-team-editor .criteria-editor-heading small { color: #909789; font-size: 11px; font-weight: 450; letter-spacing: 0; }
+.contest-team-table-wrap { max-height: 230px; overflow: auto; border: 1px solid #e6eadf; border-radius: 10px; background: #fcfdfa; }
+.contest-team-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.contest-team-table th { position: sticky; top: 0; z-index: 1; padding: 10px 12px; border-bottom: 1px solid #e4e8dd; background: #f6f8f1; color: #7b8471; text-align: left; font-size: 11px; font-weight: 750; }
+.contest-team-table th:last-child, .contest-team-table td:last-child { width: 50px; text-align: center; }
+.contest-team-table td { padding: 8px 10px; border-bottom: 1px solid #e9ece5; }
+.contest-team-table tbody tr:last-child td { border-bottom: 0; }
+.contest-team-table input { width: 100%; height: 40px; border: 1px solid #e4e8dd; border-radius: 8px; padding: 0 10px; outline: 0; background: white; color: #3e4734; font: inherit; font-size: 13px; }
+.contest-team-table input:focus { border-color: #aeba99; box-shadow: 0 0 0 3px #455e1510; }
+.contest-team-table input::placeholder { color: #adb2a8; }
+.contest-team-empty { margin: 0; padding: 14px; border: 1px dashed #dce3d2; border-radius: 9px; color: #899080; font-size: 12px; }
 
 @media (max-width: 980px) {
   .contest-criteria-panels { grid-template-columns: minmax(0, 1fr); }
@@ -631,11 +652,6 @@ img { -webkit-user-drag: none; user-select: none; }
   .contest-schedule-fields { grid-template-columns: 1fr; gap: 0; }
   .criteria-editor-heading { align-items: flex-start; }
   .criteria-editor-heading .text-action { white-space: nowrap; }
-  .criteria-editor-row { grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) 30px; gap: 8px; padding: 10px; }
-  .criteria-editor-row > label:nth-of-type(1) { grid-column: 2 / 4; grid-row: 1; }
-  .criteria-editor-row > label:nth-of-type(2) { grid-column: 2 / 4; grid-row: 2; }
-  .criteria-editor-row > label:nth-of-type(3) { grid-column: 2 / 4; grid-row: 3; }
-  .criteria-remove { grid-column: 4; grid-row: 1; }
 }
 @media (min-width: 761px) and (max-width: 1050px) {
   .manage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

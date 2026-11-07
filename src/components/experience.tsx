@@ -17,7 +17,7 @@ import {
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import sanitizeHtml from "sanitize-html";
-import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, ContestTeam, Material, MaterialCategory, MaterialFile, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
@@ -48,6 +48,12 @@ type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id
 
 function sanitizeContestMechanicsHtml(value: string) {
   return sanitizeHtml(value, contestMechanicsSanitizeOptions).trim();
+}
+
+function createContestTeamId() {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function displayDate(date: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }) {
@@ -1226,6 +1232,7 @@ export default function Experience() {
     const timeStart = String(form.get("timeStart") ?? "").trim();
     const mechanicsHtml = sanitizeContestMechanicsHtml(String(form.get("mechanicsHtml") ?? ""));
     let criteria: Array<{ criteria: string; description: string; weight: number }>;
+    let teams: ContestTeam[];
     try {
       const rows = JSON.parse(String(form.get("criteriaRows"))) as Array<{ criteria?: unknown; description?: unknown; weight?: unknown }>;
       criteria = rows.map((row) => ({
@@ -1236,6 +1243,12 @@ export default function Experience() {
     } catch {
       criteria = [];
     }
+    try {
+      const rows = JSON.parse(String(form.get("contestTeamsJson") ?? "[]")) as Array<{ id?: unknown; name?: unknown }>;
+      teams = rows.map((row) => ({ id: String(row.id ?? "").trim() || createContestTeamId(), name: String(row.name ?? "").trim().replace(/\s+/g, " ") })).filter((team) => team.name);
+    } catch {
+      teams = [];
+    }
     if (!contestDate || !timeStart) {
       setToast({ kind: "error", text: "Choose a contest date and start time." });
       return;
@@ -1244,13 +1257,18 @@ export default function Experience() {
       setToast({ kind: "error", text: "Complete every criteria row and enter a non-negative weight for each." });
       return;
     }
+    if (teams.length > 50) {
+      setToast({ kind: "error", text: "A contest can have up to 50 judging teams." });
+      return;
+    }
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
     try {
       const adminUser = await getVerifiedAdmin();
       if (editingMechanics) {
         const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
+        const teamSettings = teams.length || Array.isArray(editingMechanics.teams) ? { teams } : {};
         const updates = [
-          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, mechanicsHtml, updatedAt: serverTimestamp() } },
+          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, ...teamSettings, mechanicsHtml, updatedAt: serverTimestamp() } },
           ...joins.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id, data: { programId: program.id, contest, updatedAt: serverTimestamp() } })),
         ];
         for (let start = 0; start < updates.length; start += 450) {
@@ -1262,6 +1280,20 @@ export default function Experience() {
       } else {
         const programMechanics = await getDocs(query(collection(db, "contestMechanics"), where("programId", "==", program.id)));
         const matching = programMechanics.docs.find((entry) => String(entry.data().contest ?? "").trim().toLowerCase() === contest.toLowerCase());
+        if (matching && teams.length) {
+          const existingTeams = Array.isArray(matching.data().teams) ? matching.data().teams as ContestTeam[] : [];
+          const teamNames = new Set(existingTeams.map((team) => team.name.trim().toLowerCase()));
+          const resultingTeamCount = existingTeams.length + teams.filter((team) => {
+            const key = team.name.toLowerCase();
+            if (teamNames.has(key)) return false;
+            teamNames.add(key);
+            return true;
+          }).length;
+          if (resultingTeamCount > 50) {
+            setToast({ kind: "error", text: "A contest can have up to 50 judging teams." });
+            return;
+          }
+        }
         const mechanicsRef = doc(db, "contestMechanics", matching?.id ?? contestId);
         await runTransaction(db, async (transaction) => {
           const existing = await transaction.get(mechanicsRef);
@@ -1269,6 +1301,7 @@ export default function Experience() {
             const current = existing.data() as ContestMechanics;
             transaction.update(mechanicsRef, {
               criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
+              ...(teams.length ? { teams: [...(Array.isArray(current.teams) ? current.teams : []), ...teams.filter((team) => !(current.teams ?? []).some((existing) => existing.name.trim().toLowerCase() === team.name.toLowerCase()))] } : {}),
               mechanicsHtml: mechanicsHtml || current.mechanicsHtml || "",
               contestDate,
               timeStart,
@@ -1285,6 +1318,7 @@ export default function Experience() {
               contestDate,
               timeStart,
               criteria,
+              ...(teams.length ? { teams } : {}),
               mechanicsHtml,
               createdAt: serverTimestamp(),
               createdBy: adminUser.uid,
@@ -2240,6 +2274,12 @@ function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatu
 function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMechanics; judgeUid: string; onClose: () => void }) {
   const criteria = contest.criteria ?? [];
   const criteriaSignature = criteria.map((criterion) => `${criterion.criteria}:${criterion.weight}`).join("|");
+  const hasConfiguredTeams = Array.isArray(contest.teams);
+  const configuredTeams = (hasConfiguredTeams ? contest.teams! : []).map((team, index) => ({
+    id: typeof team.id === "string" && team.id ? team.id : `contest-team-${index + 1}`,
+    name: typeof team.name === "string" ? team.name.trim() : "",
+  })).filter((team) => team.name);
+  const configuredTeamsSignature = `${hasConfiguredTeams}:${JSON.stringify(configuredTeams)}`;
   const [teams, setTeams] = useState<ContestScoreTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2252,12 +2292,24 @@ function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMecha
     getDoc(doc(db, "contestScoreSheets", contest.id, "judges", judgeUid))
       .then((snapshot) => {
         if (cancelled) return;
-        if (!snapshot.exists()) { setTeams([]); return; }
-        const savedTeams = (snapshot.data() as ContestScoreSheet).teams;
-        setTeams((Array.isArray(savedTeams) ? savedTeams : []).map((team, index) => ({
-          id: typeof team.id === "string" ? team.id : `team-${index + 1}`,
-          name: typeof team.name === "string" ? team.name : `Team ${index + 1}`,
-          hidden: team.hidden === true,
+        const savedTeams = snapshot.exists() ? (snapshot.data() as ContestScoreSheet).teams : [];
+        const saved = Array.isArray(savedTeams) ? savedTeams : [];
+        const teamsToScore = hasConfiguredTeams
+          ? configuredTeams.map((team) => {
+            const savedTeam = saved.find((entry) => entry.id === team.id)
+              ?? saved.find((entry) => entry.name.trim().toLowerCase() === team.name.toLowerCase());
+            return { id: team.id, name: team.name, hidden: savedTeam?.hidden === true, scores: savedTeam?.scores };
+          })
+          : saved.map((team, index) => ({
+            id: typeof team.id === "string" ? team.id : `team-${index + 1}`,
+            name: typeof team.name === "string" ? team.name : `Team ${index + 1}`,
+            hidden: team.hidden === true,
+            scores: team.scores,
+          }));
+        setTeams(teamsToScore.map((team) => ({
+          id: team.id,
+          name: team.name,
+          hidden: team.hidden,
           scores: criteria.map((criterion, scoreIndex) => {
             const value = Array.isArray(team.scores) ? team.scores[scoreIndex] : null;
             if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
@@ -2268,7 +2320,7 @@ function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMecha
       .catch((error) => { if (!cancelled) setNotice(errorText(error)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [contest.id, judgeUid, criteriaSignature]);
+  }, [contest.id, judgeUid, criteriaSignature, configuredTeamsSignature]);
 
   function updateTeam(teamId: string, changes: Partial<ContestScoreTeam>) {
     setTeams((current) => current.map((team) => team.id === teamId ? { ...team, ...changes } : team));
@@ -2315,12 +2367,12 @@ function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMecha
 
   return <div className="modal-backdrop judge-score-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
     <section className="form-modal judge-score-modal" role="dialog" aria-modal="true" aria-labelledby="judge-score-title" aria-live="polite">
-      <div className="form-modal-head judge-score-modal-head"><div><span className="eyebrow">JUDGE SCORE SHEET</span><h2 id="judge-score-title">{contest.contest}<span> scores</span></h2><p>Enter a score up to each criterion maximum. This sheet is private to your judge account.</p></div><div className="judge-score-actions"><button type="button" className="button button--soft" onClick={onClose} disabled={saving}>Close</button><button type="button" className="button button--olive" onClick={addTeam} disabled={loading || saving || criteria.length === 0 || teams.length >= 50}><Plus size={15} /> Add Team</button></div></div>
+      <div className="form-modal-head judge-score-modal-head"><div><span className="eyebrow">JUDGE SCORE SHEET</span><h2 id="judge-score-title">{contest.contest}<span> scores</span></h2><p>{hasConfiguredTeams ? "Score the teams assigned to this contest. Team names are managed in contest settings." : "Enter a score up to each criterion maximum. This sheet is private to your judge account."}</p></div><div className="judge-score-actions">{!hasConfiguredTeams && <button type="button" className="button button--olive" onClick={addTeam} disabled={loading || saving || criteria.length === 0 || teams.length >= 50}><Plus size={15} /> Add Team</button>}<button type="button" className="button button--soft" onClick={onClose} disabled={saving}>Close</button></div></div>
       {loading ? <p className="judge-score-message">Loading your score sheet…</p> : criteria.length === 0 ? <p className="judge-score-message">This contest has no scoring criteria yet.</p> : <>
-        {teams.length === 0 && <p className="judge-score-message">No teams have been added to your sheet yet. Add a team to create its scoring column.</p>}
-        <div className="judge-score-table-wrap"><table className="judge-score-table"><thead><tr><th className="judge-score-criteria-column">CRITERIA</th><th className="judge-score-max-column">MAX</th>{teams.map((team, index) => <th key={team.id}><div className="judge-team-heading"><span className="judge-team-number">TEAM {String(index + 1).padStart(2, "0")}</span>{team.hidden ? <span className="judge-team-hidden-name">Name hidden</span> : <input aria-label={`Name for team ${index + 1}`} value={team.name} disabled={saving} onChange={(event) => updateTeam(team.id, { name: event.target.value })} />}<button type="button" className="judge-team-visibility" aria-label={`${team.hidden ? "Reveal" : "Hide"} ${team.name || `Team ${index + 1}`}`} onClick={() => updateTeam(team.id, { hidden: !team.hidden })} disabled={saving}>{team.hidden ? <><Eye size={14} /> Reveal</> : <><EyeOff size={14} /> Hide</>}</button></div></th>)}</tr></thead><tbody>
+        {teams.length === 0 && <p className="judge-score-message">No teams have been added to this contest yet. {hasConfiguredTeams ? "Add teams in the contest settings." : "Add a team to create its scoring column."}</p>}
+        <div className="judge-score-table-wrap"><table className="judge-score-table"><thead><tr><th className="judge-score-criteria-column">CRITERIA</th><th className="judge-score-max-column">MAX</th>{teams.map((team, index) => <th key={team.id}><div className="judge-team-heading"><span className="judge-team-number">TEAM {String(index + 1).padStart(2, "0")}</span>{team.hidden ? <span className="judge-team-hidden-name">Name hidden</span> : <input aria-label={`Name for team ${index + 1}`} value={team.name} disabled={saving || hasConfiguredTeams} onChange={(event) => updateTeam(team.id, { name: event.target.value })} />}<button type="button" className="judge-team-visibility" aria-label={`${team.hidden ? "Reveal" : "Hide"} ${team.name || `Team ${index + 1}`}`} onClick={() => updateTeam(team.id, { hidden: !team.hidden })} disabled={saving}>{team.hidden ? <><Eye size={14} /> Reveal</> : <><EyeOff size={14} /> Hide</>}</button></div></th>)}</tr></thead><tbody>
           {criteria.map((criterion, criterionIndex) => <tr key={`${criterion.criteria}-${criterionIndex}`}><td><strong>{criterion.criteria}</strong><small>{criterion.description}</small></td><td className="judge-score-maximum">{scoreText(Number(criterion.weight) || 0)}%</td>{teams.map((team) => <td key={team.id}>{team.hidden ? <span className="judge-score-concealed">Hidden</span> : <label className="judge-score-input-wrap"><input aria-label={`${team.name}, ${criterion.criteria}`} type="number" min="0" max={Math.max(0, Number(criterion.weight) || 0)} step="0.01" value={team.scores[criterionIndex] ?? ""} disabled={saving} onChange={(event) => changeScore(team, criterionIndex, event.target.value)} /><span>%</span></label>}</td>)}</tr>)}
-          {teams.length === 0 && <tr><td colSpan={2} className="judge-score-no-team-cell">Add a team column to enter scores.</td></tr>}
+      {teams.length === 0 && <tr><td colSpan={2} className="judge-score-no-team-cell">Add a team column to enter scores.</td></tr>}
           <tr className="judge-score-total-row"><td><strong>Total score</strong></td><td className="judge-score-maximum">{scoreText(contestWeightTotal(criteria))}%</td>{teams.map((team) => <td key={team.id}><strong>{team.hidden ? "Hidden" : `${scoreText(team.scores.reduce<number>((total, score) => total + (score ?? 0), 0))}%`}</strong></td>)}</tr>
         </tbody></table></div>
       </>}
@@ -2471,10 +2523,14 @@ function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; on
 
 function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
+  const [contestTeams, setContestTeams] = useState<ContestTeam[]>(() => initialMechanics?.teams?.length
+    ? initialMechanics.teams.map((team, index) => ({ id: String(team.id ?? "").trim() || `team-${index + 1}`, name: String(team.name ?? "") }))
+    : [{ id: "new-team-1", name: "" }]);
   const [mechanicsHtml, setMechanicsHtml] = useState(initialMechanics?.mechanicsHtml ?? "");
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
+  const updateContestTeam = (id: string, name: string) => setContestTeams((current) => current.map((team) => team.id === id ? { ...team, name } : team));
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest criteria" : "Add contest criteria"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest criteria" : "Add contest criteria"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <div className="contest-schedule-fields">
@@ -2484,12 +2540,17 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
       <Field label="Time Start"><input type="time" name="timeStart" defaultValue={initialMechanics?.timeStart ?? ""} required /></Field>
     </div>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
+    <input type="hidden" name="contestTeamsJson" value={JSON.stringify(contestTeams)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
-    <div className="criteria-editor-list">{criteriaRows.map((row, index) => <div className="criteria-editor-row" key={index}><span className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</span><label><span>Criteria</span><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></label><label><span>Description</span><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></label><label><span>Weight (%)</span><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></label><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></div>)}</div>
+    <div className="criteria-editor-list"><table className="criteria-editor-table"><thead><tr><th scope="col" aria-label="Row number" /><th scope="col">Criteria</th><th scope="col">Description</th><th scope="col">Weight (%)</th><th scope="col" aria-label="Actions" /></tr></thead><tbody>{criteriaRows.map((row, index) => <tr key={index}><td className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</td><td><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></td><td><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></td><td><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></td><td><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></td></tr>)}</tbody></table></div>
     <input type="hidden" name="mechanicsHtml" value={mechanicsHtml} readOnly />
     <section className="contest-mechanics-rich-text-section">
       <div className="criteria-editor-heading"><div><span>CONTEST MECHANICS</span><small>Optional rules, instructions, and details for contestants.</small></div></div>
       <ContestMechanicsRichTextEditor value={mechanicsHtml} onChange={setMechanicsHtml} />
+    </section>
+    <section className="contest-team-editor">
+      <div className="criteria-editor-heading"><div><span>TEAMS FOR JUDGING</span><small>These teams will appear on judges’ score sheets for this contest.</small></div><button type="button" className="text-action" disabled={contestTeams.length >= 50} onClick={() => setContestTeams((current) => [...current, { id: createContestTeamId(), name: "" }])}><Plus size={15} /> Add Team</button></div>
+      {contestTeams.length ? <div className="contest-team-table-wrap"><table className="contest-team-table"><thead><tr><th scope="col">Team</th><th scope="col" aria-label="Actions" /></tr></thead><tbody>{contestTeams.map((team, index) => <tr key={team.id}><td><input aria-label={`Judging team ${index + 1}`} value={team.name} onChange={(event) => updateContestTeam(team.id, event.target.value)} placeholder="Enter a team name" /></td><td><button type="button" className="criteria-remove" aria-label={`Remove judging team ${index + 1}`} onClick={() => setContestTeams((current) => current.filter((entry) => entry.id !== team.id))}><X size={16} /></button></td></tr>)}</tbody></table></div> : <p className="contest-team-empty">No judging teams have been added.</p>}
     </section>
     {programs.length === 0 && <p className="form-hint">Publish a program before adding contest criteria.</p>}
     <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">{initialMechanics ? "Save changes" : "Save criteria"} <ArrowRight size={16} /></button></div>

@@ -157,6 +157,7 @@ function normalizeProgramSession(item: ProgramSession): ProgramSession {
     date: item.date,
     ...sessionTimeRange(item),
     session: item.session,
+    topics: Array.isArray(item.topics) ? item.topics.map((topic) => String(topic ?? "").trim()).filter(Boolean) : [],
     allParticipants: Boolean(item.allParticipants),
     responsibleNotApplicable: Boolean(item.responsibleNotApplicable),
     responsible: responsible.length ? responsible : [emptyResponsiblePerson()],
@@ -1391,7 +1392,7 @@ export default function Experience() {
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
-      {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
+      {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} programs={programs} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
       {materialModal && <MaterialModal key={editingMaterial?.id ?? "new-material"} programs={programs} initialMaterial={editingMaterial} onClose={() => { setMaterialModal(false); setEditingMaterial(null); }} onCreate={createMaterial} busy={uploadBusy} />}
       {speakerModal && <SpeakerModal key={editingSpeaker?.id ?? "new-speaker"} programs={programs} initialSpeaker={editingSpeaker} onClose={() => { setSpeakerModal(false); setEditingSpeaker(null); }} onSave={createSpeaker} busy={uploadBusy} />}
@@ -1973,14 +1974,25 @@ function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Materia
   return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find program flows, communication letters, guides, and other materials shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item)} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
-function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
+function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initialProgram: Program | null; programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map(normalizeProgramSession) : [{ date: "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
   const [eventDateFrom, setEventDateFrom] = useState(initialProgram?.dateFrom ?? "");
   const [eventDateTo, setEventDateTo] = useState(initialProgram?.dateTo ?? "");
   const [keynoteTopics, setKeynoteTopics] = useState<ProgramKeynoteTopic[]>(() => initialProgram?.keynoteTopics?.length ? initialProgram.keynoteTopics.map((item) => ({ ...item })) : [{ date: "", session: "", topic: "" }]);
   const keynoteDateOptions = useMemo(() => dateOptionsBetween(eventDateFrom, eventDateTo), [eventDateFrom, eventDateTo]);
+  const savedTopicOptions = useMemo(() => Array.from(new Set([
+    ...programs.flatMap((program) => program.keynoteTopics?.map((item) => item.topic.trim()).filter(Boolean) ?? []),
+    ...keynoteTopics.map((item) => item.topic.trim()).filter(Boolean),
+  ])).sort((a, b) => a.localeCompare(b)), [keynoteTopics, programs]);
 
   const updateSession = (index: number, updates: Partial<ProgramSession>) => setSessions((current) => current.map((session, i) => i === index ? { ...session, ...updates } : session));
+  const updateSessionTopic = (sessionIndex: number, topicIndex: number, value: string) => setSessions((current) => current.map((session, i) => {
+    if (i !== sessionIndex) return session;
+    const topics = session.topics?.length ? session.topics : [""];
+    return { ...session, topics: topics.map((topic, j) => j === topicIndex ? value : topic) };
+  }));
+  const addSessionTopic = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: [...(session.topics?.length ? session.topics : [""]), ""] } : session));
+  const removeSessionTopic = (sessionIndex: number, topicIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: (session.topics?.length ? session.topics : [""]).filter((_, j) => j !== topicIndex) } : session));
   const updateResponsible = (sessionIndex: number, personIndex: number, field: keyof ResponsiblePerson, value: string) => setSessions((current) => current.map((session, i) => {
     if (i !== sessionIndex) return session;
     const people = responsiblePeople(session.responsible);
@@ -2059,6 +2071,17 @@ function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: P
             <label className="session-edit-field session-edit-field--end"><span>End time</span><input autoComplete="off" lang="en-US" type="time" aria-label="End time (HH:MM AM/PM)" value={sessionTimeRange(item).endTime} onChange={(event) => updateSession(index, { endTime: event.target.value })} required /></label>
             <label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label>
             <button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button>
+          </div>
+          <div className="session-edit-topics">
+            <div className="session-edit-topics-head"><span>Topics</span><button type="button" className="text-action" onClick={() => addSessionTopic(index)}><Plus size={13} /> Add topic</button></div>
+            <div className="session-edit-topic-list">{(item.topics?.length ? item.topics : [""]).map((topic, topicIndex) => <div className="session-edit-topic-row" key={topicIndex}>
+              <label className="session-edit-field"><span>Topic</span><select aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)}>
+                <option value="">Select a saved topic</option>
+                {topic && !savedTopicOptions.includes(topic) && <option value={topic}>{topic}</option>}
+                {savedTopicOptions.map((savedTopic) => <option key={savedTopic} value={savedTopic}>{savedTopic}</option>)}
+              </select></label>
+              <button type="button" className="remove-session" aria-label={`Remove topic ${topicIndex + 1} from session ${index + 1}`} disabled={(item.topics?.length ?? 0) <= 1} onClick={() => removeSessionTopic(index, topicIndex)}><X size={14} /></button>
+            </div>)}</div>
           </div>
           <div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>
             {responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}>

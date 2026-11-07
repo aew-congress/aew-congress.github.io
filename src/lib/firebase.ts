@@ -49,6 +49,8 @@ export type ProgramSession = {
   /** Legacy field retained so existing Firestore program documents remain readable. */
   time?: string;
   session: string;
+  /** Optional topic tags attached to this daily-flow session. */
+  topics?: string[];
   allParticipants?: boolean;
   responsibleNotApplicable?: boolean;
   responsible: ResponsiblePerson[] | string;

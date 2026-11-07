@@ -178,6 +178,11 @@ img { -webkit-user-drag: none; user-select: none; }
 .session-time { color: #838a7b; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: middle; }
 .session-name { color: #31372c; font-size: 14px; font-weight: 700; vertical-align: middle; }.session-title { font-size: 14px; font-weight: 700; }.session-topics { margin: 6px 0 0; padding-left: 18px; color: #71796a; font-size: 12px; font-weight: 450; line-height: 1.55; }.session-topics li + li { margin-top: 2px; }
 .session-person { color: #71796a; font-size: 12px; }
+.schedule-table .session-topic-title-row > td { padding-top: 15px; padding-bottom: 9px; border-bottom: 0; }
+.schedule-table .session-topic-row > td { height: auto; padding-top: 9px; padding-bottom: 9px; vertical-align: top; border-bottom: 1px solid #e5e8df; }
+.schedule-table tbody tr.session-topic-row td { border-bottom: 1px solid #e5e8df; }
+.session-topic-cell { color: #71796a; font-size: 12px; font-weight: 450; line-height: 1.55; }
+.session-topic-row-list { margin: 0; padding-left: 18px; }
 .empty-table { height: 170px !important; text-align: center; color: #9aa090; }.empty-table > svg { display: block; margin: 0 auto 9px; color: #adb794; }.empty-table strong, .empty-table span { display: block; }.empty-table strong { color: #576048; font-size: 15px; margin-bottom: 4px; }.empty-table span { font-size: 12px; }
 .schedule-footer { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e5e8df; border-top: 0; background: #f9faf6; min-height: 45px; padding: 0 18px; border-radius: 0 0 11px 11px; color: #878e7d; font-size: 11px; }.schedule-footer > span { display: flex; align-items: center; gap: 7px; }.footer-spark { color: #c6a42b; font-size: 16px; }.schedule-footer button { background: transparent; border: 0; display: flex; align-items: center; gap: 6px; color: var(--olive); font-size: 11px; cursor: pointer; }
 

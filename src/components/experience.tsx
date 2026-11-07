@@ -176,6 +176,14 @@ function responsibleSearchText(value: ProgramSession["responsible"]) {
   return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
 }
 
+function sessionTableRowCount(item: ProgramSession) {
+  const topics = (item.topics ?? []).filter(Boolean);
+  if (!topics.length) return 1;
+  if (item.allParticipants || item.responsibleNotApplicable) return topics.length + 1;
+  const peopleCount = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office).length;
+  return 1 + Math.max(topics.length, peopleCount);
+}
+
 function saveDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -436,7 +444,8 @@ export default function Experience() {
           groupEnd += 1;
         }
       }
-      rows.push({ item, timeRowSpan: groupEnd - index, timeGroup, period, periodLabel });
+      const groupedRowSpan = filteredSessions.slice(index, groupEnd).reduce((count, session) => count + sessionTableRowCount(session), 0);
+      rows.push({ item, timeRowSpan: groupedRowSpan, timeGroup, period, periodLabel });
       for (let groupedIndex = index + 1; groupedIndex < groupEnd; groupedIndex += 1) {
         rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0, timeGroup, period, periodLabel: "" });
       }
@@ -1452,6 +1461,12 @@ export default function Experience() {
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
                   const periodKey = `${selectedProgram.id}:${item.date}:${period}`;
                   const periodExpanded = !period || expandedSessionPeriods.has(periodKey);
+                  const topics = (item.topics ?? []).filter(Boolean);
+                  const people = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office);
+                  const topicRowCount = Math.max(topics.length, item.allParticipants || item.responsibleNotApplicable ? 0 : people.length);
+                  const topicRows = topics.length ? Array.from({ length: topicRowCount }, (_, topicIndex) => ({ topic: topics[topicIndex] ?? "", person: people[topicIndex] })) : [];
+                  const sessionRowClass = `session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`;
+                  const setHoveredGroup = (hovered: boolean) => setHoveredTimeGroup((current) => hovered ? timeGroup : current === timeGroup ? null : current);
                   return <Fragment key={`${item.date}-${item.startTime ?? item.time}-${item.session}-${index}`}>
                     {periodLabel && <tr className="session-period-row"><th colSpan={3} scope="rowgroup"><button type="button" aria-expanded={periodExpanded} onClick={() => setExpandedSessionPeriods((current) => {
                       const next = new Set(current);
@@ -1459,7 +1474,20 @@ export default function Experience() {
                       else next.add(periodKey);
                       return next;
                     })}><ChevronRight size={14} />{periodLabel}</button></th></tr>}
-                    {periodExpanded && <tr className={`session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`} onMouseEnter={() => setHoveredTimeGroup(timeGroup)} onMouseLeave={() => setHoveredTimeGroup((current) => current === timeGroup ? null : current)} style={{ animationDelay: `${index * 45}ms` }}>{timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}<td className="session-name"><div className="session-title">{item.session}</div>{Boolean(item.topics?.length) && <ul className="session-topics" aria-label="Topics">{item.topics?.map((topic, topicIndex) => <li key={`${topic}-${topicIndex}`}>{topic}</li>)}</ul>}</td><td className="session-person"><SessionResponsibleDisplay item={item} /></td></tr>}
+                    {periodExpanded && topicRows.length > 0 ? <>
+                      <tr className={`${sessionRowClass} session-topic-title-row`} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)} style={{ animationDelay: `${index * 45}ms` }}>
+                        {timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}
+                        <td className="session-name" colSpan={2}><div className="session-title">{item.session}</div></td>
+                      </tr>
+                      {topicRows.map(({ topic, person }, topicIndex) => <tr className={`${sessionRowClass} session-topic-row`} key={`${topic}-${topicIndex}`} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)}>
+                        <td className="session-topic-cell">{topic && <ul className="session-topic-row-list" aria-label="Topic"><li>{topic}</li></ul>}</td>
+                        <td className="session-person">{item.allParticipants ? <span className="all-participants-value">All Participants</span> : !item.responsibleNotApplicable && person && <div className="session-person-list"><span><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span></div>}</td>
+                      </tr>)}
+                    </> : periodExpanded && <tr className={sessionRowClass} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)} style={{ animationDelay: `${index * 45}ms` }}>
+                      {timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}
+                      <td className="session-name"><div className="session-title">{item.session}</div></td>
+                      <td className="session-person"><SessionResponsibleDisplay item={item} /></td>
+                    </tr>}
                   </Fragment>;
                 })}
                 {!filteredSessions.length && <tr><td colSpan={3} className="empty-table"><Search size={19} /><strong>No matching sessions</strong><span>Try a different search term.</span></td></tr>}

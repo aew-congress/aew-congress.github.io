@@ -35,6 +35,8 @@ export type UserProfile = {
   email: string;
   /** Optional for records created before role management was added. */
   role?: UserRole;
+  /** Optional judging assignment for approved members. */
+  judge?: "Yes" | "No";
   /** False until the member verifies the address used at registration. */
   emailVerified?: boolean;
   status: AccountStatus;
@@ -96,6 +98,19 @@ export type ContestJoin = {
   status?: "Joined" | "Qualified Contestant";
 };
 
+export type ContestScoreTeam = {
+  id: string;
+  name: string;
+  hidden: boolean;
+  scores: Array<number | null>;
+};
+export type ContestScoreSheet = {
+  contestId: string;
+  judgeUid: string;
+  teams: ContestScoreTeam[];
+  updatedAt?: unknown;
+};
+
 export type AttendanceConfirmation = {
   id: string;
   programId: string;
@@ -104,6 +119,8 @@ export type AttendanceConfirmation = {
 };
 
 export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet" | "Program Flow" | "Communication Letter";
+export type MaterialFile = { url: string; name: string; type?: string };
+export type MaterialImage = { url: string; name: string };
 export type Material = {
   id: string;
   programId: string;
@@ -111,6 +128,12 @@ export type Material = {
   category: MaterialCategory;
   /** Optional topic tag for presentation materials. */
   topic?: string;
+  /** Optional keynote-session tag for program-flow materials. */
+  keynoteSession?: string;
+  /** Optional image attachments, used by program-flow materials. */
+  images?: MaterialImage[];
+  /** Optional list of uploaded files; older materials use `url` and `name`. */
+  files?: MaterialFile[];
   name: string;
   url: string;
   enabled?: boolean;

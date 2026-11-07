@@ -12,14 +12,18 @@ import {
   ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
   EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
-  Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
+  Menu, Pencil, Plus, Printer, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramKeynoteTopic, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramKeynoteTopic, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
+const START_ACCESS_CODE = "AEW2026";
+const GUEST_ACCESS_STORAGE_KEY = "aew-congress-guest-access";
+type BrowserBarcodeDetector = { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>> };
+type BrowserBarcodeDetectorConstructor = new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
 const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
@@ -189,14 +193,31 @@ function emailVerificationActionSettings() {
   return { url: window.location.origin, handleCodeInApp: false };
 }
 
-function materialFilename(material: Material) {
-  const name = material.name.trim() || "program-material";
+function materialFilename(material: Material, attachment?: MaterialFile) {
+  const name = attachment?.name.trim() || material.name.trim() || "program-material";
   if (/\.[a-z0-9]{1,8}$/i.test(name)) return name;
   try {
-    const pathname = new URL(material.url).pathname;
+    const pathname = new URL(attachment?.url || material.url).pathname;
     const extension = pathname.match(/\.([a-z0-9]{1,8})$/i)?.[1];
     return extension ? `${name}.${extension}` : name;
   } catch { return name; }
+}
+
+function getMaterialAttachments(material: Material): MaterialFile[] {
+  const attachments = material.files?.length
+    ? [...material.files]
+    : material.images?.length
+      ? material.images.map((image) => ({ ...image, type: "image/*" }))
+      : [];
+  if (material.url && !attachments.some((file) => file.url === material.url)) {
+    attachments.unshift({ url: material.url, name: material.name });
+  }
+  return attachments;
+}
+
+function isImageAttachment(file: MaterialFile) {
+  return file.type?.toLowerCase().startsWith("image/") === true
+    || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)(?:[?#\s]|$)/i.test(`${file.name} ${file.url}`);
 }
 
 function isUploadThingFile(value: string) {
@@ -284,6 +305,7 @@ export default function Experience() {
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
+  const [guestAccess, setGuestAccess] = useState(false);
   const [section, setSection] = useState<Section>("home");
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const [selectedDay, setSelectedDay] = useState(0);
@@ -295,6 +317,7 @@ export default function Experience() {
   const [attendanceSubmitting, setAttendanceSubmitting] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
+  const [startAccessOpen, setStartAccessOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [programModal, setProgramModal] = useState(false);
@@ -323,7 +346,9 @@ export default function Experience() {
   const isAdmin = isSuperadmin || Boolean(user && user.emailVerified && profileRole(activeProfile ?? {}) === "admin");
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
-  const signedIn = isAdmin || isApprovedMember;
+  const isDesignatedJudge = activeProfile?.judge === "Yes" || profiles.some((profile) => profile.uid === user?.uid && profile.judge === "Yes");
+  const canJudgeContests = Boolean(user?.emailVerified && isDesignatedJudge && (isAdmin || isRegularMember));
+  const signedIn = isAdmin || isApprovedMember || guestAccess;
   const currentYear = philippineCurrentYear();
   const currentYearProgram = useMemo(() => {
     const thisYearPrograms = programs.filter((program) => Number(program.dateFrom?.slice(0, 4)) === currentYear);
@@ -337,6 +362,11 @@ export default function Experience() {
     if (window.location.hash === "#top") {
       window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
     }
+  }, []);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active") setGuestAccess(true);
+    } catch { /* Guest mode can still be entered for the current visit if storage is unavailable. */ }
   }, []);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const attendanceConfirmationId = user && selectedProgram ? `${selectedProgram.id}_${user.uid}` : "";
@@ -427,6 +457,8 @@ export default function Experience() {
       setLoadingStartedAt((startedAt) => startedAt ?? Date.now());
       try {
         if (!current) { setUser(null); setActiveProfile(null); return; }
+        setGuestAccess(false);
+        try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
         // Login and registration handle verification and approval in sequence. Avoid
         // racing those flows with the background session guard.
         if (authActionInProgress.current) { setUser(current); return; }
@@ -541,12 +573,14 @@ export default function Experience() {
   }, [user]);
 
   useEffect(() => {
-    if (!signedIn) { setMaterials([]); return; }
-    const stopMaterials = onSnapshot(query(collection(db, "materials"), orderBy("createdAt", "desc")), (snapshot) => {
+    const materialsQuery = isAdmin || isApprovedMember
+      ? query(collection(db, "materials"), orderBy("createdAt", "desc"))
+      : query(collection(db, "materials"), where("enabled", "==", true));
+    const stopMaterials = onSnapshot(materialsQuery, (snapshot) => {
       setMaterials(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as Material)));
     }, (error) => setCloudIssue(errorText(error)));
     return stopMaterials;
-  }, [signedIn]);
+  }, [isAdmin, isApprovedMember]);
 
   useEffect(() => {
     const stopSpeakers = onSnapshot(collection(db, "speakers"), (snapshot) => {
@@ -557,18 +591,13 @@ export default function Experience() {
   }, []);
 
   useEffect(() => {
-    if (!signedIn) {
-      setContestMechanics([]);
-      setContestMechanicsLoading(false);
-      return;
-    }
     setContestMechanicsLoading(true);
     const stop = onSnapshot(query(collection(db, "contestMechanics"), orderBy("createdAt", "desc")), (snapshot) => {
       setContestMechanics(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ContestMechanics)));
       setContestMechanicsLoading(false);
     }, (error) => { setCloudIssue(errorText(error)); setContestMechanicsLoading(false); });
     return stop;
-  }, [signedIn]);
+  }, []);
 
   useEffect(() => {
     if (!isApprovedMember || !user) {
@@ -679,27 +708,29 @@ export default function Experience() {
     }
   }
 
-  async function downloadMaterial(material: Material) {
+  async function downloadMaterial(material: Material, attachment?: MaterialFile) {
     if (!isAdmin && material.enabled === false) return;
-    if (!isUploadThingFile(material.url)) {
+    const resourceUrl = attachment?.url || material.url;
+    const filename = materialFilename(material, attachment);
+    if (!isUploadThingFile(resourceUrl)) {
       const anchor = document.createElement("a");
-      anchor.href = material.url;
+      anchor.href = resourceUrl;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
-      anchor.download = materialFilename(material);
+      anchor.download = filename;
       anchor.click();
       setToast({ kind: "info", text: "This is an external resource. Its host controls whether it opens or downloads." });
       return;
     }
 
     try {
-      const url = new URL(uploadthingDownloadEndpoint);
-      url.searchParams.set("url", material.url);
-      url.searchParams.set("name", materialFilename(material));
-      const response = await fetch(url, { cache: "no-store" });
+      const downloadUrl = new URL(uploadthingDownloadEndpoint);
+      downloadUrl.searchParams.set("url", resourceUrl);
+      downloadUrl.searchParams.set("name", filename);
+      const response = await fetch(downloadUrl, { cache: "no-store" });
       if (!response.ok) throw new Error("The file could not be downloaded. Please try again.");
-      const filename = response.headers.get("content-disposition")?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-      const safeFilename = filename ? decodeURIComponent(filename) : materialFilename(material);
+      const responseFilename = response.headers.get("content-disposition")?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+      const safeFilename = responseFilename ? decodeURIComponent(responseFilename) : materialFilename(material, attachment);
       saveDownload(await response.blob(), safeFilename);
       setToast({ kind: "success", text: `Download started: ${safeFilename}` });
     } catch (error) { showError(error); }
@@ -897,6 +928,14 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
+  async function changeJudge(profile: UserProfile, judge: NonNullable<UserProfile["judge"]>) {
+    if (!isSuperadmin) { setToast({ kind: "error", text: "Only a superadmin can manage judge assignments." }); return; }
+    try {
+      await updateDoc(doc(db, "userProfiles", profile.uid), { judge });
+      setToast({ kind: "success", text: `${fullName(profile)} judge status set to ${judge}.` });
+    } catch (error) { showError(error); }
+  }
+
   async function createProgram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !isAdmin) {
@@ -985,31 +1024,50 @@ export default function Experience() {
     catch (error) { showError(error); return; }
     const targetProgram = programs.find((program) => program.id === String(form.get("programId")));
     if (!targetProgram) { setToast({ kind: "error", text: "Choose a published program for this material." }); return; }
-    const file = form.get("materialFile");
+    const files = form.getAll("materialFiles").filter((value): value is File => value instanceof File && value.size > 0);
     const externalUrl = String(form.get("materialUrl")).trim();
     const category = String(form.get("category")) as MaterialCategory;
     const topic = category === "Presentation" ? String(form.get("topic") ?? "").trim() : "";
-    let url = externalUrl || editingMaterial?.url || "";
-    let name = String(form.get("materialName")).trim() || editingMaterial?.name || "";
-    if (file instanceof File && file.size > 0) {
+    const keynoteSession = category === "Program Flow" ? String(form.get("keynoteSession") ?? "").trim() : "";
+    if (category === "Program Flow" && !targetProgram.keynoteTopics?.some((item) => item.session.trim() === keynoteSession)) {
+      setToast({ kind: "error", text: "Choose a saved keynote session for this program flow material." });
+      return;
+    }
+    let uploadedFiles: MaterialFile[] = [];
+    if (files.length > 0) {
       setUploadBusy(true);
       try {
-        const result = await uploadFiles("materialUploader", {
-          files: [file],
+        const results = await uploadFiles("materialUploader", {
+          files,
           headers: async () => ({ Authorization: `Bearer ${await adminUser.getIdToken()}` }),
         });
-        url = result[0]?.ufsUrl ?? "";
-        name = name || file.name;
+        files.forEach((uploadedFile, index) => {
+          const result = results[index];
+          if (result?.ufsUrl) uploadedFiles.push({ url: result.ufsUrl, name: result.name || uploadedFile.name, type: uploadedFile.type });
+        });
       } catch (error) { setUploadBusy(false); showError(error); return; }
       setUploadBusy(false);
     }
-    if (!url) { setToast({ kind: "error", text: "Add a resource link or choose a file to upload." }); return; }
+    const existingFiles = editingMaterial?.files?.length
+      ? editingMaterial.files
+      : editingMaterial?.images?.map((image) => ({ ...image, type: "image/*" })) ?? [];
+    if (!existingFiles.length && editingMaterial && isUploadThingFile(editingMaterial.url)) {
+      existingFiles.push({ url: editingMaterial.url, name: editingMaterial.name, ...(isImageAttachment({ url: editingMaterial.url, name: editingMaterial.name }) ? { type: "image/*" } : {}) });
+    }
+    const attachments = uploadedFiles.length ? uploadedFiles : existingFiles;
+    const images = category === "Program Flow" ? attachments.filter(isImageAttachment).map(({ url, name }) => ({ url, name })) : [];
+    const url = externalUrl || attachments[0]?.url || editingMaterial?.url || "";
+    const name = String(form.get("materialName")).trim() || editingMaterial?.name || attachments[0]?.name || "";
+    if (!url) { setToast({ kind: "error", text: "Add a resource link or upload one or more files." }); return; }
     try {
       const payload = {
         programId: targetProgram.id,
         programTitle: targetProgram.eventTitle,
         category,
         topic,
+        keynoteSession,
+        images,
+        files: attachments,
         name: name || url.split("/").pop() || "Program resource",
         url,
         enabled: editingMaterial ? editingMaterial.enabled !== false : false,
@@ -1296,15 +1354,33 @@ export default function Experience() {
 
   async function logout() {
     await signOut(auth);
+    setGuestAccess(false);
+    try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
     setSection("home");
     setMobileMenuOpen(false);
     setAttendanceConfirmOpen(false);
     setToast({ kind: "success", text: "You have signed out." });
   }
 
+  function enterGuestAccess() {
+    setGuestAccess(true);
+    try { window.localStorage.setItem(GUEST_ACCESS_STORAGE_KEY, "active"); } catch { /* Keep guest access for this visit if storage is unavailable. */ }
+    setStartAccessOpen(false);
+    setMobileMenuOpen(false);
+    setSection("home");
+  }
+
+  function exitGuestAccess() {
+    setGuestAccess(false);
+    try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    setMobileMenuOpen(false);
+    setSection("home");
+    setToast({ kind: "info", text: "Guest access has ended." });
+  }
+
   const navItems: { id: Section; label: string }[] = [
-    ...(isApprovedMember ? [{ id: "programs" as Section, label: "Programs" }] : []),
-    ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
+    ...(isApprovedMember || guestAccess ? [{ id: "programs" as Section, label: "Programs" }] : []),
+    ...(isApprovedMember || guestAccess || canJudgeContests ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Criteria" }] : []),
     ...(isAdmin ? [{ id: "speakers" as Section, label: "Speakers" }] : signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage Content" }] : []),
@@ -1334,26 +1410,26 @@ export default function Experience() {
           {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}
         </nav>}
         <div className="topbar-actions">
-          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{isSuperadmin ? "Superadmin" : isAdmin ? "Admin" : activeProfile?.firstName}</span><IconButton label="Sign out" onClick={logout}><LogOut size={18} /></IconButton></> : <button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button>}
+          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{guestAccess ? "Masaganang Agrikultura!" : isSuperadmin ? "Superadmin" : isAdmin ? "Admin" : activeProfile?.firstName}</span><IconButton label={guestAccess ? "Exit guest access" : "Sign out"} onClick={guestAccess ? exitGuestAccess : logout}><LogOut size={18} /></IconButton></> : <><button className="start-access-button" onClick={() => setStartAccessOpen(true)}>Start</button><button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button></>}
           {signedIn && <button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>}
         </div>
       </header>
 
       <main id="top">
         {section === "approval" && isSuperadmin ? (
-          <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
+          <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeJudge={changeJudge} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
           <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
-        ) : section === "contests" && isApprovedMember ? (
-          <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={(contest) => setContestJoinConfirm(contest)} />
+          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} canViewRanking={isSuperadmin} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
+        ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
+          <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
           <SpeakersPage speakers={speakers} programs={programs} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
         ) : section === "materials" ? (
-          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} isRegularMember={isRegularMember} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
+          <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} isRegularMember={isRegularMember || guestAccess} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
           <>
             {section === "home" && <HomeLanding program={currentYearProgram} currentYear={currentYear} loading={loading} onExplorePrograms={() => setSection("programs")} onKnowSpeakers={() => setSection("speakers")} />}
@@ -1402,6 +1478,7 @@ export default function Experience() {
 
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
+      {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} programs={programs} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
@@ -1659,6 +1736,105 @@ function ContestJoinConfirmationModal({ contestName, eventTitle, busy, onCancel,
   </div>;
 }
 
+function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: () => void }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerStarting, setScannerStarting] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const onEnterRef = useRef(onEnter);
+
+  useEffect(() => { onEnterRef.current = onEnter; }, [onEnter]);
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    let active = true;
+    let animationFrame = 0;
+    let stream: MediaStream | undefined;
+    const video = videoRef.current;
+    const Detector = (window as Window & { BarcodeDetector?: BrowserBarcodeDetectorConstructor }).BarcodeDetector;
+
+    if (!Detector) {
+      setScannerStarting(false);
+      setCameraError("QR scanning is unavailable in this browser. Enter the code manually instead.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !video) {
+      setScannerStarting(false);
+      setCameraError("A camera is unavailable here. Enter the code manually instead.");
+      return;
+    }
+
+    setScannerStarting(true);
+    setCameraError("");
+    void (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" } } });
+        if (!active) { stream.getTracks().forEach((track) => track.stop()); return; }
+        video.srcObject = stream;
+        await video.play();
+        const detector = new Detector({ formats: ["qr_code"] });
+        setScannerStarting(false);
+
+        const scanFrame = async () => {
+          if (!active) return;
+          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            try {
+              const [result] = await detector.detect(video);
+              if (result?.rawValue) {
+                const scannedCode = result.rawValue.trim();
+                setCode(scannedCode);
+                setScannerOpen(false);
+                if (scannedCode === START_ACCESS_CODE) onEnterRef.current();
+                else setError("This QR code is not valid for guest access. Enter the access code manually.");
+                return;
+              }
+            } catch { /* Keep scanning while the camera delivers frames. */ }
+          }
+          if (active) animationFrame = window.requestAnimationFrame(() => { void scanFrame(); });
+        };
+
+        animationFrame = window.requestAnimationFrame(() => { void scanFrame(); });
+      } catch (cameraError) {
+        if (!active) return;
+        setScannerStarting(false);
+        setCameraError(cameraError instanceof DOMException && cameraError.name === "NotAllowedError"
+          ? "Camera access was blocked. Allow camera access or enter the code manually."
+          : "Could not start the camera. Enter the code manually instead.");
+      }
+    })();
+
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(animationFrame);
+      stream?.getTracks().forEach((track) => track.stop());
+      if (video.srcObject === stream) video.srcObject = null;
+    };
+  }, [scannerOpen]);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (code.trim() !== START_ACCESS_CODE) {
+      setError("That access code is not valid. Please try again.");
+      return;
+    }
+    onEnter();
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+    <section className="form-modal start-access-modal" role="dialog" aria-modal="true" aria-labelledby="start-access-title">
+      <div className="form-modal-head"><div><span className="eyebrow">AEW CONGRESS 2026</span><h2 id="start-access-title">Start browsing.</h2><p>Enter the access code to explore the congress as a guest.</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <form onSubmit={submit}>
+        <Field label="Access code" icon={<LockKeyhole size={15} />}><span className="start-access-code-control"><input autoFocus type="password" autoComplete="off" value={code} onChange={(event) => { setCode(event.target.value); setError(""); }} placeholder="Enter access code" required aria-invalid={Boolean(error)} aria-describedby={error ? "start-access-error" : undefined} /><button className="start-access-scan-button" type="button" onClick={() => { setCameraError(""); setScannerOpen((open) => !open); }} aria-label={scannerOpen ? "Close QR scanner" : "Scan QR code"} title={scannerOpen ? "Close QR scanner" : "Scan QR code"}><QrCode size={19} /></button></span></Field>
+        {scannerOpen && <div className="start-access-scanner" aria-live="polite"><video ref={videoRef} playsInline muted aria-label="Camera view for QR code scanning" />{scannerStarting && <span className="start-access-scanner-status">Starting camera…</span>}{cameraError && <span className="start-access-scanner-error" role="alert">{cameraError}</span>}{!scannerStarting && !cameraError && <span className="start-access-scanner-status">Point the camera at the AEW guest access QR code.</span>}<button type="button" className="start-access-stop-scan" onClick={() => setScannerOpen(false)}>Close scanner</button></div>}
+        {error && <p className="start-access-error" id="start-access-error" role="alert">{error}</p>}
+        <div className="form-modal-actions"><button className="button button--soft" type="button" onClick={onClose}>Cancel</button><button className="button button--olive" type="submit">Enter <ArrowRight size={15} /></button></div>
+      </form>
+    </section>
+  </div>;
+}
+
 function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
   mode: "login" | "create" | "reset"; setMode: (value: "login" | "create" | "reset") => void; onClose: () => void;
   onLogin: (event: FormEvent<HTMLFormElement>) => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; onForgot: (email: string) => void;
@@ -1750,8 +1926,8 @@ function Field({ label, icon, children }: { label: string; icon?: React.ReactNod
   return <label className="field"><span className="field-label">{icon}{label}</span><span className="field-control">{children}</span></label>;
 }
 
-function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, onAddProgram, onAddMaterial }: {
-  profiles: UserProfile[]; loading: boolean; onChangeRole: (profile: UserProfile, role: UserRole) => void; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
+function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeJudge, onChangeStatus, onAddProgram, onAddMaterial }: {
+  profiles: UserProfile[]; loading: boolean; onChangeRole: (profile: UserProfile, role: UserRole) => void; onChangeJudge: (profile: UserProfile, judge: NonNullable<UserProfile["judge"]>) => void; onChangeStatus: (profile: UserProfile, status: UserProfile["status"]) => void; onAddProgram: () => void; onAddMaterial: () => void;
 }) {
   const [filter, setFilter] = useState("Pending");
   const [philippineNow, setPhilippineNow] = useState<Date | null>(null);
@@ -1767,9 +1943,9 @@ function ApprovalDashboard({ profiles, loading, onChangeRole, onChangeStatus, on
   return <div className="content-wrap dashboard-page"><div className="dashboard-welcome"><div><span className="eyebrow"><ShieldCheck size={14} /> SUPERADMIN WORKSPACE</span><h1>{philippineNow ? philippineGreeting(philippineNow) : "Welcome"},<br /><span>let’s keep things</span> <i>moving.</i></h1><p>Manage registrations, shape the program calendar, and keep resources organized.</p></div><div className="dashboard-date"><span>{philippineNow ? new Intl.DateTimeFormat("en-PH", { weekday: "long", timeZone: "Asia/Manila" }).format(philippineNow).toUpperCase() : "PHILIPPINE TIME"}</span><strong>{philippineNow ? new Intl.DateTimeFormat("en-PH", { month: "long", day: "numeric", timeZone: "Asia/Manila" }).format(philippineNow) : "—"}</strong><small>CARAGA · REGION XIII</small></div></div>
     <div className="admin-stats"><div className="admin-stat admin-stat--highlight"><span className="stat-label">NEEDS REVIEW</span><strong>{String(counts.Pending).padStart(2, "0")}</strong><span className="stat-foot"><span className="online-dot" />Pending registrations</span></div><div className="admin-stat"><span className="stat-label">APPROVED USERS</span><strong>{String(counts.Approved).padStart(2, "0")}</strong><span className="stat-foot">Cleared for sign-in</span></div><div className="admin-stat"><span className="stat-label">NOT APPROVED</span><strong>{String(counts.Disapproved).padStart(2, "0")}</strong><span className="stat-foot">Can be reviewed again</span></div><div className="admin-stat admin-quick-actions"><span className="stat-label">QUICK ACTIONS</span><button onClick={onAddProgram}><Plus size={15} /> Create a program <ArrowUpRight size={14} /></button><button onClick={onAddMaterial}><Plus size={15} /> Add a material <ArrowUpRight size={14} /></button></div></div>
     <section className="approval-panel"><div className="panel-heading"><div><span className="eyebrow">ACCESS CONTROL</span><h2>User Approval <span>& directory</span></h2><p>Verified accounts appear here as Pending. Approve an account to unlock member access.</p></div><div className="approval-filter">{["Pending", "Approved", "Disapproved", "All"].map((status) => <button key={status} className={filter === status ? "filter-chip filter-chip--active" : "filter-chip"} onClick={() => setFilter(status)}>{status}{status === "Pending" && <span>{counts.Pending}</span>}</button>)}</div></div>
-      <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>STATUS</th></tr></thead><tbody>
-        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{nameInitials(profile)}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="admin">admin</option><option value="regular">regular</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
-        {!filtered.length && <tr><td colSpan={6} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}
+      <div className="approval-table-wrap"><table className="approval-table"><thead><tr><th>NAME / EMAIL</th><th>DESIGNATION</th><th>OFFICE</th><th>CONTACT NO.</th><th>ROLE</th><th>JUDGE</th><th>STATUS</th></tr></thead><tbody>
+        {filtered.map((profile) => <tr key={profile.uid}><td><div className="user-cell"><span className="user-avatar">{nameInitials(profile)}</span><span><strong>{fullName(profile)}</strong><small>{profile.email}</small></span></div></td><td><strong className="table-primary">{profile.designation || profile.position}</strong><small className="table-muted">{profile.position}</small></td><td>{profile.office}</td><td>{profile.contactNo}</td><td><select aria-label={`Role for ${fullName(profile)}`} className={`role-select role-select--${profileRole(profile)}`} value={profileRole(profile)} disabled={profile.email.toLowerCase() === SUPERADMIN_EMAIL} onChange={(event) => onChangeRole(profile, event.target.value as UserRole)}><option value="superadmin">superadmin</option><option value="admin">admin</option><option value="regular">regular</option></select></td><td><select aria-label={`Judge for ${fullName(profile)}`} className={`judge-select judge-select--${(profile.judge ?? "No").toLowerCase()}`} value={profile.judge ?? "No"} onChange={(event) => onChangeJudge(profile, event.target.value === "Yes" ? "Yes" : "No")}><option>Yes</option><option>No</option></select></td><td><select aria-label={`Status for ${fullName(profile)}`} className={`status-select status-select--${profile.status.toLowerCase()}`} value={profile.status} onChange={(event) => onChangeStatus(profile, event.target.value as UserProfile["status"])}><option>Pending</option><option>Approved</option><option>Disapproved</option></select></td></tr>)}
+        {!filtered.length && <tr><td colSpan={7} className="empty-table"><UsersRound size={20} /><strong>{loading ? "Loading registrations…" : "No accounts in this view"}</strong><span>{loading ? "Your directory will appear in a moment." : "New registrations will show up here."}</span></td></tr>}
       </tbody></table></div><div className="table-footnote"><span><LockKeyhole size={13} /> Personal details are private to superadmins.</span><span>{filtered.length} {filtered.length === 1 ? "account" : "accounts"}</span></div>
     </section>
   </div>;
@@ -1835,10 +2011,11 @@ function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
   return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
 }
 
-function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, onAdd, onEdit, onDelete }: {
-  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
+function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, canViewRanking, onAdd, onEdit, onDelete }: {
+  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; canViewRanking: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
 }) {
   const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
+  const [viewingRankings, setViewingRankings] = useState<ContestMechanics | null>(null);
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const filteredMechanics = (selectedProgramId ? mechanics.filter((item) => item.programId === selectedProgramId) : mechanics).slice().sort(compareContestSchedule);
   const profilesByUid = new Map(profiles.map((profile) => [profile.uid, profile]));
@@ -1856,7 +2033,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
         <div className="approval-table-wrap"><table className="approval-table contest-table contest-table--directory"><thead><tr><th>CONTEST</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {filteredMechanics.map((item) => {
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
-            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => setViewingContestants(item)}><Eye size={15} />View</button></div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
+            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => { setViewingRankings(null); setViewingContestants(item); }}><Eye size={15} />View</button>{canViewRanking && <button className="contest-view ranking-view" aria-label={`View ranking for ${item.contest}`} onClick={() => { setViewingContestants(null); setViewingRankings(item); }}>View Ranking</button>}</div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
           {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest criteria…" : selectedProgramId ? "No contest criteria for this program" : "No contest criteria yet"}</strong><span>{loading ? "Saved contest criteria will appear here." : selectedProgramId ? "Add contest criteria for this program's contests to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest criteria."}</span></td></tr>}
         </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest criteria.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
@@ -1867,32 +2044,226 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
       const qualified = join.status === "Qualified Contestant";
       return <tr key={join.id}><td><strong className="table-primary">{profile ? fullName(profile) || "Member" : "Member profile unavailable"}</strong></td><td>{profile?.designation || "—"}</td><td>{profile?.office || "—"}</td><td>{profile?.contactNo || "—"}</td><td><div className="contestant-confirm-cell">{qualified ? <span className="qualified-contestant">Qualified Contestant</span> : <><span className="table-muted">Joined</span><button className="button button--soft contestant-confirm-button" disabled={Boolean(confirmingJoinId)} onClick={() => onConfirmContestant(join)}>{confirmingJoinId === join.id ? "Confirming…" : "Confirm"}</button></>}</div></td></tr>;
     }) : <tr><td colSpan={5} className="empty-table"><UsersRound size={20} /><strong>No contestants yet</strong><span>Members who join this contest will appear here.</span></td></tr>}</tbody></table></div><div className="form-modal-actions"><button className="button button--soft" disabled={Boolean(confirmingJoinId)} onClick={() => setViewingContestants(null)}>Close</button></div></section></div>}
+    {viewingRankings && <ContestRankingsModal key={viewingRankings.id} contest={viewingRankings} onClose={() => setViewingRankings(null)} />}
   </>;
 }
 
-function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatuses, joiningContestId, loading, onJoin }: {
-  contests: ContestMechanics[]; programs: Program[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; onJoin: (contest: ContestMechanics) => void;
+function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics; onClose: () => void }) {
+  const criteria = contest.criteria ?? [];
+  const criteriaSignature = criteria.map((criterion) => `${criterion.criteria}:${criterion.weight}`).join("|");
+  const [rankings, setRankings] = useState<Array<{ rank: number; name: string; criterionScores: Array<number | null>; criterionJudges: number[]; judgeCount: number; total: number }>>([]);
+  const [judgeSheetCount, setJudgeSheetCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    getDocs(collection(db, "contestScoreSheets", contest.id, "judges"))
+      .then((snapshot) => {
+        if (cancelled) return;
+        type JudgeTeamScores = { name: string; sums: number[]; counts: number[] };
+        type CombinedTeamScores = { name: string; sums: number[]; counts: number[]; judges: Set<string> };
+        const combined = new Map<string, CombinedTeamScores>();
+        snapshot.docs.forEach((document) => {
+          const sheet = document.data() as ContestScoreSheet;
+          const judgeId = sheet.judgeUid || document.id;
+          const perJudge = new Map<string, JudgeTeamScores>();
+          (Array.isArray(sheet.teams) ? sheet.teams : []).forEach((team) => {
+            const teamName = typeof team.name === "string" ? team.name.trim().replace(/\s+/g, " ") : "";
+            const teamKey = teamName.toLocaleLowerCase();
+            if (!teamKey) return;
+            let judgeTeam = perJudge.get(teamKey);
+            if (!judgeTeam) {
+              judgeTeam = { name: teamName, sums: criteria.map(() => 0), counts: criteria.map(() => 0) };
+              perJudge.set(teamKey, judgeTeam);
+            }
+            criteria.forEach((criterion, criterionIndex) => {
+              const score = Array.isArray(team.scores) ? team.scores[criterionIndex] : null;
+              if (score === null || score === undefined || !Number.isFinite(Number(score))) return;
+              const maximum = Math.max(0, Number(criterion.weight) || 0);
+              judgeTeam!.sums[criterionIndex] += Math.min(maximum, Math.max(0, Number(score)));
+              judgeTeam!.counts[criterionIndex] += 1;
+            });
+          });
+          perJudge.forEach((judgeTeam, teamKey) => {
+            let team = combined.get(teamKey);
+            if (!team) {
+              team = { name: judgeTeam.name, sums: criteria.map(() => 0), counts: criteria.map(() => 0), judges: new Set<string>() };
+              combined.set(teamKey, team);
+            }
+            let submittedScore = false;
+            criteria.forEach((_, criterionIndex) => {
+              const scoreCount = judgeTeam.counts[criterionIndex];
+              if (scoreCount === 0) return;
+              team!.sums[criterionIndex] += judgeTeam.sums[criterionIndex] / scoreCount;
+              team!.counts[criterionIndex] += 1;
+              submittedScore = true;
+            });
+            if (submittedScore) team.judges.add(judgeId);
+          });
+        });
+        const sorted = Array.from(combined.values()).map((team) => {
+          const criterionScores = criteria.map((_, index) => team.counts[index] ? team.sums[index] / team.counts[index] : null);
+          return {
+            rank: 0,
+            name: team.name,
+            criterionScores,
+            criterionJudges: [...team.counts],
+            judgeCount: team.judges.size,
+            total: criterionScores.reduce<number>((total, score) => total + (score ?? 0), 0),
+          };
+        }).filter((team) => team.judgeCount > 0).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+        let currentRank = 0;
+        let previousScore: number | null = null;
+        const ranked = sorted.map((team, index) => {
+          if (previousScore === null || Math.abs(previousScore - team.total) >= 0.005) currentRank = index + 1;
+          previousScore = team.total;
+          return { ...team, rank: currentRank };
+        });
+        setRankings(ranked);
+        setJudgeSheetCount(snapshot.size);
+      })
+      .catch((loadError) => { if (!cancelled) setError(errorText(loadError)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [contest.id, criteriaSignature]);
+
+  function scoreText(value: number) {
+    return Number(value.toFixed(2)).toString();
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="form-modal contest-rankings-modal" role="dialog" aria-modal="true" aria-labelledby="contest-rankings-title">
+      <div className="form-modal-head"><div><span className="eyebrow">SUPERADMIN · JUDGE RESULTS</span><h2 id="contest-rankings-title">Team ranking<span>.</span></h2><p>{contest.contest} · {contest.eventTitle}</p><small>Each criterion is averaged across judges who scored it. The total is the sum of those weighted averages.</small></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close ranking"><X size={19} /></button></div>
+      {loading ? <p className="ranking-message">Loading judge score sheets…</p> : error ? <p className="ranking-message ranking-message--error" role="alert">{error}</p> : rankings.length === 0 ? <div className="ranking-empty"><strong>No judge scores are available yet.</strong><span>Rankings will appear after judges save their score sheets.</span></div> : <>
+        <p className="ranking-summary">{String(rankings.length).padStart(2, "0")} teams ranked · {judgeSheetCount} {judgeSheetCount === 1 ? "judge sheet" : "judge sheets"} · Maximum total {scoreText(contestWeightTotal(criteria))}%</p>
+        <div className="ranking-table-wrap"><table className="ranking-table"><thead><tr><th>RANK</th><th>TEAM</th>{criteria.map((criterion, index) => <th key={`${criterion.criteria}-${index}`}><span>{criterion.criteria}</span><small>Max {scoreText(Number(criterion.weight) || 0)}%</small></th>)}<th>JUDGES</th><th>TOTAL</th></tr></thead><tbody>
+          {rankings.map((team) => <tr key={team.name}><td><strong className={team.rank === 1 ? "ranking-place ranking-place--first" : "ranking-place"}>{team.rank}</strong></td><td><strong className="table-primary">{team.name}</strong></td>{criteria.map((_, index) => <td key={`${team.name}-${index}`}><strong>{team.criterionScores[index] === null ? "—" : `${scoreText(team.criterionScores[index] ?? 0)}%`}</strong><small>{team.criterionJudges[index]} {team.criterionJudges[index] === 1 ? "judge" : "judges"}</small></td>)}<td>{team.judgeCount}</td><td><strong className="ranking-total">{scoreText(team.total)}%</strong></td></tr>)}
+        </tbody></table></div>
+      </>}
+      <div className="form-modal-actions"><button className="button button--soft" onClick={onClose}>Close</button></div>
+    </section>
+  </div>;
+}
+function ContestsPage({ contests, programs, joinedContestIds, joinedContestStatuses, joiningContestId, loading, canJoin, canJudge, judgeUid, onJoin }: {
+  contests: ContestMechanics[]; programs: Program[]; joinedContestIds: string[]; joinedContestStatuses: Record<string, string>; joiningContestId: string; loading: boolean; canJoin: boolean; canJudge: boolean; judgeUid: string; onJoin: (contest: ContestMechanics) => void;
 }) {
   const [selectedContestId, setSelectedContestId] = useState("");
+  const [selectedJudgeContestId, setSelectedJudgeContestId] = useState("");
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const displayedContests = contests.filter((contest) => !selectedProgramId || contest.programId === selectedProgramId).slice().sort(compareContestSchedule);
   const selectedContest = displayedContests.find((contest) => contest.id === selectedContestId);
+  const selectedJudgeContest = displayedContests.find((contest) => contest.id === selectedJudgeContestId);
   return <div className="content-wrap dashboard-page contest-page">
     <div className="section-heading contest-heading"><div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Contests <span>& opportunities</span></h2><p>Explore program contests, review contest criteria, and join when you’re ready.</p></div><span className="contest-count">{String(displayedContests.length).padStart(2, "0")} {displayedContests.length === 1 ? "CONTEST" : "CONTESTS"}</span></div>
-    <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>Your participation is saved to your approved member account.</p></div><ProgramFilterDropdown id="member-contest-program-filter" programs={programs} value={selectedProgramId} className="contest-member-filter" onChange={(programId) => { setSelectedProgramId(programId); setSelectedContestId(""); }} /></div>
+    <section className="approval-panel contest-panel"><div className="panel-heading contest-panel-heading"><div><span className="eyebrow">OPEN CONTESTS</span><h2>Program contests</h2><p>{canJudge ? "Review the criteria or enter your scores for each team." : "Your participation is saved to your approved member account."}</p></div><ProgramFilterDropdown id="member-contest-program-filter" programs={programs} value={selectedProgramId} className="contest-member-filter" onChange={(programId) => { setSelectedProgramId(programId); setSelectedContestId(""); setSelectedJudgeContestId(""); }} /></div>
       <div className="approval-table-wrap"><table className="approval-table contest-table"><thead><tr><th>CONTEST DATE/TIME</th><th>CONTEST</th><th>JOIN</th><th>CONTEST CRITERIA</th></tr></thead><tbody>
         {displayedContests.map((contest) => {
           const joined = joinedContestIds.includes(contest.id);
           const qualified = joinedContestStatuses[contest.id] === "Qualified Contestant";
-          return <tr key={contest.id}><td><strong className="table-primary">{contest.contestDate ? displayDate(contest.contestDate) : "Date to be announced"}</strong><small className="table-muted">{contest.timeStart ? formatTimeValue(contest.timeStart) : "Time to be announced"}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td><button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button></td><td><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => setSelectedContestId((current) => current === contest.id ? "" : contest.id)}>{selectedContestId === contest.id ? "Hide criteria" : "View criteria"}<ArrowUpRight size={14} /></button></td></tr>;
+          return <tr key={contest.id}><td><strong className="table-primary">{contest.contestDate ? displayDate(contest.contestDate) : "Date to be announced"}</strong><small className="table-muted">{contest.timeStart ? formatTimeValue(contest.timeStart) : "Time to be announced"}</small></td><td><strong className="table-primary">{contest.contest}</strong></td><td>{canJoin ? <button className={`contest-join${joined ? " contest-join--joined" : ""}${qualified ? " contest-join--qualified" : ""}`} disabled={joined || joiningContestId === contest.id} onClick={() => onJoin(contest)}>{joined ? <><Check size={14} />{qualified ? "Qualified Contestant" : "Joined"}</> : joiningContestId === contest.id ? "Joining…" : "Join"}</button> : <span className="contest-join-unavailable">—</span>}</td><td><div className="contest-row-actions"><button className="contest-view" aria-expanded={selectedContestId === contest.id} onClick={() => { setSelectedJudgeContestId(""); setSelectedContestId((current) => current === contest.id ? "" : contest.id); }}>{selectedContestId === contest.id ? "Hide criteria" : "View criteria"}<ArrowUpRight size={14} /></button>{canJudge && <button className="contest-judge" aria-expanded={selectedJudgeContestId === contest.id} onClick={() => { setSelectedContestId(""); setSelectedJudgeContestId((current) => current === contest.id ? "" : contest.id); }}>{selectedJudgeContestId === contest.id ? "Close score sheet" : "Judge"}</button>}</div></td></tr>;
         })}
         {!displayedContests.length && <tr><td colSpan={4} className="empty-table"><CalendarDays size={20} /><strong>{loading ? "Loading contests…" : selectedProgramId ? "No contests for this program yet" : "No contests have been published yet"}</strong><span>{loading ? "Program contests will appear here." : selectedProgramId ? "Choose another program or check back when a contest is announced." : "Check back when a program contest is announced."}</span></td></tr>}
       </tbody></table></div>
     </section>
     {selectedContest && <section className="approval-panel contest-mechanics-detail" aria-live="polite"><div className="panel-heading"><div><span className="eyebrow">{selectedContest.eventTitle}</span><h2>{selectedContest.contest} <span>criteria</span></h2><p>{dateRange(selectedContest.dateFrom, selectedContest.dateTo)} · {selectedContest.venue}</p></div></div><div className="approval-table-wrap"><table className="approval-table contest-detail-table"><thead><tr><th>CRITERIA</th><th>DESCRIPTION</th><th>WEIGHT</th></tr></thead><tbody>{(selectedContest.criteria || []).map((criterion, index) => <tr key={`${criterion.criteria}-${index}`}><td><strong className="table-primary">{criterion.criteria}</strong></td><td className="contest-description">{criterion.description}</td><td><strong className="contest-weight">{Number(criterion.weight)}%</strong></td></tr>)}<tr className="contest-total-row"><td colSpan={2}><strong>Total</strong></td><td><strong className="contest-weight">{contestWeightTotal(selectedContest.criteria)}%</strong></td></tr></tbody></table></div></section>}
+    {selectedJudgeContest && <JudgeScoreSheet key={`${selectedJudgeContest.id}-${judgeUid}`} contest={selectedJudgeContest} judgeUid={judgeUid} onClose={() => setSelectedJudgeContestId("")} />}
   </div>;
 }
 
+function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMechanics; judgeUid: string; onClose: () => void }) {
+  const criteria = contest.criteria ?? [];
+  const criteriaSignature = criteria.map((criterion) => `${criterion.criteria}:${criterion.weight}`).join("|");
+  const [teams, setTeams] = useState<ContestScoreTeam[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setNotice("");
+    getDoc(doc(db, "contestScoreSheets", contest.id, "judges", judgeUid))
+      .then((snapshot) => {
+        if (cancelled) return;
+        if (!snapshot.exists()) { setTeams([]); return; }
+        const savedTeams = (snapshot.data() as ContestScoreSheet).teams;
+        setTeams((Array.isArray(savedTeams) ? savedTeams : []).map((team, index) => ({
+          id: typeof team.id === "string" ? team.id : `team-${index + 1}`,
+          name: typeof team.name === "string" ? team.name : `Team ${index + 1}`,
+          hidden: team.hidden === true,
+          scores: criteria.map((criterion, scoreIndex) => {
+            const value = Array.isArray(team.scores) ? team.scores[scoreIndex] : null;
+            if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
+            return Math.min(Math.max(0, Number(criterion.weight) || 0), Math.max(0, Number(value)));
+          }),
+        })));
+      })
+      .catch((error) => { if (!cancelled) setNotice(errorText(error)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [contest.id, judgeUid, criteriaSignature]);
+
+  function updateTeam(teamId: string, changes: Partial<ContestScoreTeam>) {
+    setTeams((current) => current.map((team) => team.id === teamId ? { ...team, ...changes } : team));
+    setNotice("");
+  }
+
+  function addTeam() {
+    if (teams.length >= 50) { setNotice("A score sheet can have up to 50 teams."); return; }
+    const teamId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setTeams((current) => [...current, { id: teamId, name: `Team ${current.length + 1}`, hidden: false, scores: criteria.map(() => null) }]);
+    setNotice("");
+  }
+
+  function changeScore(team: ContestScoreTeam, criterionIndex: number, rawValue: string) {
+    const maximum = Math.max(0, Number(criteria[criterionIndex]?.weight) || 0);
+    const score = rawValue.trim() === "" ? null : Math.min(maximum, Math.max(0, Number(rawValue) || 0));
+    const scores = team.scores.slice();
+    scores[criterionIndex] = score;
+    updateTeam(team.id, { scores });
+  }
+
+  async function saveScores() {
+    if (teams.length === 0) { setNotice("Add at least one team before saving the score sheet."); return; }
+    if (teams.some((team) => !team.name.trim())) { setNotice("Enter a name for every team before saving."); return; }
+    setSaving(true);
+    setNotice("");
+    const savedTeams = teams.map((team) => ({ ...team, name: team.name.trim() }));
+    try {
+      await setDoc(doc(db, "contestScoreSheets", contest.id, "judges", judgeUid), {
+        contestId: contest.id,
+        judgeUid,
+        teams: savedTeams,
+        updatedAt: serverTimestamp(),
+      });
+      setTeams(savedTeams);
+      setNotice("Score sheet saved.");
+    } catch (error) { setNotice(errorText(error)); }
+    finally { setSaving(false); }
+  }
+
+  function scoreText(value: number) {
+    return Number(value.toFixed(2)).toString();
+  }
+
+  return <div className="modal-backdrop judge-score-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+    <section className="form-modal judge-score-modal" role="dialog" aria-modal="true" aria-labelledby="judge-score-title" aria-live="polite">
+      <div className="form-modal-head judge-score-modal-head"><div><span className="eyebrow">JUDGE SCORE SHEET</span><h2 id="judge-score-title">{contest.contest}<span> scores</span></h2><p>Enter a score up to each criterion maximum. This sheet is private to your judge account.</p></div><div className="judge-score-actions"><button type="button" className="button button--soft" onClick={onClose} disabled={saving}>Close</button><button type="button" className="button button--olive" onClick={addTeam} disabled={loading || saving || criteria.length === 0 || teams.length >= 50}><Plus size={15} /> Add Team</button></div></div>
+      {loading ? <p className="judge-score-message">Loading your score sheet…</p> : criteria.length === 0 ? <p className="judge-score-message">This contest has no scoring criteria yet.</p> : <>
+        {teams.length === 0 && <p className="judge-score-message">No teams have been added to your sheet yet. Add a team to create its scoring column.</p>}
+        <div className="judge-score-table-wrap"><table className="judge-score-table"><thead><tr><th className="judge-score-criteria-column">CRITERIA</th><th className="judge-score-max-column">MAX</th>{teams.map((team, index) => <th key={team.id}><div className="judge-team-heading"><span className="judge-team-number">TEAM {String(index + 1).padStart(2, "0")}</span>{team.hidden ? <span className="judge-team-hidden-name">Name hidden</span> : <input aria-label={`Name for team ${index + 1}`} value={team.name} disabled={saving} onChange={(event) => updateTeam(team.id, { name: event.target.value })} />}<button type="button" className="judge-team-visibility" aria-label={`${team.hidden ? "Reveal" : "Hide"} ${team.name || `Team ${index + 1}`}`} onClick={() => updateTeam(team.id, { hidden: !team.hidden })} disabled={saving}>{team.hidden ? <><Eye size={14} /> Reveal</> : <><EyeOff size={14} /> Hide</>}</button></div></th>)}</tr></thead><tbody>
+          {criteria.map((criterion, criterionIndex) => <tr key={`${criterion.criteria}-${criterionIndex}`}><td><strong>{criterion.criteria}</strong><small>{criterion.description}</small></td><td className="judge-score-maximum">{scoreText(Number(criterion.weight) || 0)}%</td>{teams.map((team) => <td key={team.id}>{team.hidden ? <span className="judge-score-concealed">Hidden</span> : <label className="judge-score-input-wrap"><input aria-label={`${team.name}, ${criterion.criteria}`} type="number" min="0" max={Math.max(0, Number(criterion.weight) || 0)} step="0.01" value={team.scores[criterionIndex] ?? ""} disabled={saving} onChange={(event) => changeScore(team, criterionIndex, event.target.value)} /><span>%</span></label>}</td>)}</tr>)}
+          {teams.length === 0 && <tr><td colSpan={2} className="judge-score-no-team-cell">Add a team column to enter scores.</td></tr>}
+          <tr className="judge-score-total-row"><td><strong>Total score</strong></td><td className="judge-score-maximum">{scoreText(contestWeightTotal(criteria))}%</td>{teams.map((team) => <td key={team.id}><strong>{team.hidden ? "Hidden" : `${scoreText(team.scores.reduce<number>((total, score) => total + (score ?? 0), 0))}%`}</strong></td>)}</tr>
+        </tbody></table></div>
+      </>}
+      <div className="judge-score-footer"><span className={notice === "Score sheet saved." ? "judge-score-notice judge-score-notice--saved" : "judge-score-notice"} role="status">{notice}</span><button type="button" className="button button--olive" onClick={saveScores} disabled={loading || saving || criteria.length === 0}>{saving ? "Saving…" : "Save score sheet"}<ArrowRight size={16} /></button></div>
+    </section>
+  </div>;
+}
 function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
@@ -1911,12 +2282,12 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
   </form></div></div>;
 }
 
-function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, onDownload, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; isRegularMember: boolean; onAdd: () => void; onDownload: (material: Material) => void; loading: boolean }) {
+function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, onDownload, loading }: { materials: Material[]; programs: Program[]; isAdmin: boolean; isRegularMember: boolean; onAdd: () => void; onDownload: (material: Material, attachment?: MaterialFile) => void; loading: boolean }) {
   const [category, setCategory] = useState<MaterialCategory>("Presentation");
   const [program, setProgram] = useState("All programs");
   const [queryText, setQueryText] = useState("");
   const [dailyIndex, setDailyIndex] = useState(0);
-  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
+  const [expandedResourceGroups, setExpandedResourceGroups] = useState<Set<string>>(() => new Set());
   const availableMaterials = isAdmin ? materials : materials.filter((material) => material.enabled !== false);
   const dailyOptions = useMemo(() => {
     const selectedPrograms = program === "All programs" ? programs : programs.filter((item) => item.id === program);
@@ -1929,7 +2300,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
   const displayed = availableMaterials.filter((material) =>
     material.category === category
     && (program === "All programs" || material.programId === program)
-    && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""}`.toLowerCase().includes(queryText.toLowerCase()))
+    && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""} ${material.keynoteSession ?? ""}`.toLowerCase().includes(queryText.toLowerCase()))
   );
   const presentationMaterials = displayed.filter((material) => material.category === "Presentation");
   const dailyPresentationMaterials = isRegularMember && category === "Presentation" && selectedDailyDate
@@ -1939,8 +2310,18 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
     topic,
     materials: dailyPresentationMaterials.filter((material) => (material.topic?.trim() || "Other presentations") === topic),
   }));
+  const programFlowMaterials = displayed.filter((material) => material.category === "Program Flow");
+  const dailyProgramFlowMaterials = isRegularMember && category === "Program Flow" && selectedDailyDate
+    ? programFlowMaterials.filter((material) => programs.find((item) => item.id === material.programId)?.keynoteTopics?.some((item) => item.date === selectedDailyDate && item.session.trim() === material.keynoteSession?.trim()) ?? false)
+    : programFlowMaterials;
+  const programFlowSessionGroups = Array.from(new Set(dailyProgramFlowMaterials.map((material) => material.keynoteSession?.trim() || "Other sessions"))).map((session) => ({
+    session,
+    materials: dailyProgramFlowMaterials.filter((material) => (material.keynoteSession?.trim() || "Other sessions") === session),
+  }));
   const colorByCategory: Record<string, string> = { Guidelines: "resource-green", Presentation: "resource-yellow", References: "resource-blue", Worksheet: "resource-orange", "Program Flow": "resource-blue", "Communication Letter": "resource-orange" };
   const isPresentationMemberView = isRegularMember && category === "Presentation";
+  const isProgramFlowMemberView = isRegularMember && category === "Program Flow";
+  const isDailyFilteredMemberView = isPresentationMemberView || isProgramFlowMemberView;
 
   return <div className="content-wrap materials-page">
 
@@ -1949,15 +2330,15 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
       <label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => { setProgram(event.target.value); setDailyIndex(0); }} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>
       {isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add material</button>}
     </div>
-    <div className="resource-categories">{resourceCategoryOrder.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation") setDailyIndex(0); }}>{item}<span>{availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
-    {isPresentationMemberView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
+    <div className="resource-categories">{resourceCategoryOrder.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation" || item === "Program Flow") setDailyIndex(0); }}>{item}<span>{availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
+    {isDailyFilteredMemberView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
     {isPresentationMemberView ? <section className="presentation-topic-library" aria-label="Presentation topics">
       <div className="presentation-topics-heading"><span className="eyebrow">TOPIC</span><p>Choose a topic to view and download its materials.</p></div>
       <div className="presentation-topic-list">
         {presentationTopicGroups.map((group) => {
-          const expanded = expandedTopics.has(group.topic);
+          const expanded = expandedResourceGroups.has(group.topic);
           return <section className="presentation-topic-group" key={group.topic}>
-            <button type="button" className="presentation-topic-toggle" aria-expanded={expanded} onClick={() => setExpandedTopics((current) => {
+            <button type="button" className="presentation-topic-toggle" aria-expanded={expanded} onClick={() => setExpandedResourceGroups((current) => {
               const next = new Set(current);
               if (next.has(group.topic)) next.delete(group.topic);
               else next.add(group.topic);
@@ -1967,22 +2348,55 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
               <span className="presentation-topic-count">{group.materials.length} {group.materials.length === 1 ? "material" : "materials"}</span>
               <ChevronDown size={18} className={expanded ? "presentation-topic-chevron presentation-topic-chevron--open" : "presentation-topic-chevron"} />
             </button>
-            {expanded && <div className="presentation-topic-materials">{group.materials.map((material) => <article className="presentation-material-row" key={material.id}>
+            {expanded && <div className="presentation-topic-materials">{group.materials.flatMap((material) => getMaterialAttachments(material).map((attachment, index) => <article className="presentation-material-row" key={`${material.id}-${attachment.url}-${index}`}>
               <span className="presentation-material-icon"><FileText size={17} /></span>
-              <span className="presentation-material-info"><strong>{material.name}</strong><small>{material.programTitle}</small></span>
-              <button type="button" className="presentation-download-button" onClick={() => onDownload(material)}><Download size={15} /> Download</button>
-            </article>)}</div>}
+              <span className="presentation-material-info"><strong>{attachment.name}</strong><small>{material.programTitle}</small></span>
+              <button type="button" className="presentation-download-button" onClick={() => onDownload(material, attachment)}><Download size={15} /> Download</button>
+            </article>))}</div>}
           </section>;
         })}
         {!presentationTopicGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PRESENTATIONS</span><h2>{loading ? "Gathering presentations…" : selectedDailyDate ? "No presentations for this day." : "No presentations are available yet."}</h2><p>{loading ? "Topic materials will appear here." : "When a presentation is shared for this topic or day, you’ll find it here."}</p></div>}
       </div>
-    </section> : <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />{isAdmin && material.enabled === false ? "Hidden from regular users" : "Available to all members"}</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
+    </section> : isProgramFlowMemberView ? <section className="presentation-topic-library" aria-label="Program flow sessions">
+      <div className="presentation-topics-heading"><span className="eyebrow">SESSION</span><p>Choose a session to view and download its materials.</p></div>
+      <div className="presentation-topic-list">
+        {programFlowSessionGroups.map((group) => {
+          const expanded = expandedResourceGroups.has(group.session);
+          return <section className="presentation-topic-group" key={group.session}>
+            <button type="button" className="presentation-topic-toggle" aria-expanded={expanded} onClick={() => setExpandedResourceGroups((current) => {
+              const next = new Set(current);
+              if (next.has(group.session)) next.delete(group.session);
+              else next.add(group.session);
+              return next;
+            })}>
+              <span className="presentation-topic-title"><strong>{group.session}</strong></span>
+              <span className="presentation-topic-count">{group.materials.length} {group.materials.length === 1 ? "material" : "materials"}</span>
+              <ChevronDown size={18} className={expanded ? "presentation-topic-chevron presentation-topic-chevron--open" : "presentation-topic-chevron"} />
+            </button>
+            {expanded && <div className="presentation-topic-materials">{group.materials.map((material) => {
+              const attachments = getMaterialAttachments(material);
+              const images = attachments.filter(isImageAttachment).map(({ url, name }) => ({ url, name }));
+              const downloadableFiles = attachments.filter((attachment) => !isImageAttachment(attachment));
+              return <div className="program-flow-material-item" key={material.id}>
+                {images.length > 0 && <div className="program-flow-image-gallery">{images.map((image, index) => <figure key={`${image.url}-${index}`}><img src={image.url} alt={`${group.session} image ${index + 1}`} loading="lazy" /></figure>)}</div>}
+                {downloadableFiles.map((attachment, index) => <article className="presentation-material-row" key={`${attachment.url}-${index}`}>
+                  <span className="presentation-material-icon"><FileText size={17} /></span>
+                  <span className="presentation-material-info"><strong>{attachment.name}</strong><small>{material.programTitle}</small></span>
+                  <button type="button" className="presentation-download-button" onClick={() => onDownload(material, attachment)}><Download size={15} /> Download</button>
+                </article>)}
+              </div>;
+            })}</div>}
+          </section>;
+        })}
+        {!programFlowSessionGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Gathering program flows…" : selectedDailyDate ? "No sessions for this day." : "No program flow materials are available yet."}</h2><p>{loading ? "Session materials will appear here." : "When a program flow resource is shared for this day, you’ll find it here."}</p></div>}
+      </div>
+    </section> : <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-files">{getMaterialAttachments(material).map((attachment, attachmentIndex) => <button type="button" key={`${attachment.url}-${attachmentIndex}`} onClick={() => onDownload(material, attachment)} title={attachment.name}><Download size={14} /><span>{attachment.name}</span></button>)}</div><div className="resource-card-foot"><span><span className="online-dot" />{isAdmin && material.enabled === false ? "Hidden from regular users" : "Available to all members"}</span></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
     </div>}
   </div>;
 }
-function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Material[]; onOpen: () => void; onDownload: (material: Material) => void }) {
-  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find program flows, communication letters, guides, and other materials shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item)} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
+function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Material[]; onOpen: () => void; onDownload: (material: Material, attachment?: MaterialFile) => void }) {
+  return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find program flows, communication letters, guides, and other materials shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item, getMaterialAttachments(item)[0])} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
 function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initialProgram: Program | null; programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -2113,18 +2527,38 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
   </div>;
 }
 function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: { programs: Program[]; initialMaterial: Material | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; busy: boolean }) {
-  const [selectedFileName, setSelectedFileName] = useState("");
-  const [resourceUrl, setResourceUrl] = useState(initialMaterial?.url ?? "");
+  const [selectedFileNames, setSelectedFileNames] = useState<string[]>([]);
+  const initialAttachments: MaterialFile[] = initialMaterial?.files?.length
+    ? initialMaterial.files
+    : initialMaterial?.images?.length
+      ? initialMaterial.images.map((image) => ({ ...image, type: "image/*" }))
+      : initialMaterial && isUploadThingFile(initialMaterial.url)
+        ? [{ url: initialMaterial.url, name: initialMaterial.name, ...(isImageAttachment({ url: initialMaterial.url, name: initialMaterial.name }) ? { type: "image/*" } : {}) }]
+        : [];
+  const [resourceUrl, setResourceUrl] = useState(initialAttachments.some((file) => file.url === initialMaterial?.url) ? "" : initialMaterial?.url ?? "");
   const [resourceError, setResourceError] = useState("");
   const [category, setCategory] = useState<MaterialCategory>(initialMaterial?.category ?? "Guidelines");
   const [topic, setTopic] = useState(initialMaterial?.topic ?? "");
+  const [selectedProgramId, setSelectedProgramId] = useState(initialMaterial?.programId ?? "");
+  const [keynoteSession, setKeynoteSession] = useState(initialMaterial?.keynoteSession ?? "");
+  const selectedProgram = programs.find((program) => program.id === selectedProgramId);
+  const savedKeynoteSessions = useMemo(() => Array.from(new Set(selectedProgram?.keynoteTopics?.map((item) => item.session.trim()).filter(Boolean) ?? [])).sort((a, b) => a.localeCompare(b)), [selectedProgram]);
   const savedTopics = useMemo(() => Array.from(new Set(programs.flatMap((program) => program.keynoteTopics?.map((item) => item.topic.trim()).filter(Boolean) ?? []))).sort((a, b) => a.localeCompare(b)), [programs]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const file = new FormData(event.currentTarget).get("materialFile");
-    if (!(file instanceof File && file.size > 0) && !resourceUrl.trim()) {
-      setResourceError("Choose a file or enter a resource URL before adding this material.");
+    const form = new FormData(event.currentTarget);
+    const files = form.getAll("materialFiles").filter((value): value is File => value instanceof File && value.size > 0);
+    if (files.length > 10) {
+      setResourceError("Choose up to 10 files at a time.");
+      return;
+    }
+    if (files.some((file) => file.size > 16 * 1024 * 1024)) {
+      setResourceError("Each file must be 16 MB or smaller.");
+      return;
+    }
+    if (files.length === 0 && !resourceUrl.trim() && !initialAttachments.length) {
+      setResourceError("Upload one or more files, or enter a resource URL before adding this material.");
       return;
     }
     setResourceError("");
@@ -2133,20 +2567,26 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}>
-      <div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Upload one or more files, or link a resource for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       <form onSubmit={handleSubmit}>
-        <Field label="Program"><select name="programId" required defaultValue={initialMaterial?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+        <Field label="Program"><select name="programId" required value={selectedProgramId} onChange={(event) => { setSelectedProgramId(event.target.value); setKeynoteSession(""); }}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
         <Field label="Category"><select name="category" value={category} onChange={(event) => setCategory(event.target.value as MaterialCategory)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></Field>
+        {category === "Program Flow" && <Field label="Keynote Session"><select name="keynoteSession" value={keynoteSession} required onChange={(event) => setKeynoteSession(event.target.value)}>
+          <option value="">{savedKeynoteSessions.length ? "Select a saved keynote session" : "No saved keynote sessions for this program"}</option>
+          {keynoteSession && !savedKeynoteSessions.includes(keynoteSession) && <option value={keynoteSession}>{keynoteSession}</option>}
+          {savedKeynoteSessions.map((session) => <option key={session} value={session}>{session}</option>)}
+        </select></Field>}
         {category === "Presentation" && <Field label="Topic"><select name="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
           <option value="">{savedTopics.length ? "Select a saved topic" : "No saved topics available"}</option>
           {topic && !savedTopics.includes(topic) && <option value={topic}>{topic}</option>}
           {savedTopics.map((savedTopic) => <option key={savedTopic} value={savedTopic}>{savedTopic}</option>)}
         </select></Field>}
         <Field label="Material name"><input name="materialName" defaultValue={initialMaterial?.name ?? ""} placeholder="e.g. Participant guide" /></Field>
-        <label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedFileName || "Choose a file"}</strong><small>{selectedFileName ? "Selected for upload" : "PDF, presentation, worksheet, or document · up to 16 MB"}</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" onChange={(event) => { setSelectedFileName(event.target.files?.[0]?.name ?? ""); setResourceError(""); }} /></span></label>
+        <label className="field"><span className="field-label">Upload files</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedFileNames.length ? `${selectedFileNames.length} file${selectedFileNames.length === 1 ? "" : "s"} selected` : "Choose one or more files"}</strong><small>{selectedFileNames.length ? selectedFileNames.join(", ") : "Documents, presentations, images, or other files · up to 10 files, 16 MB each"}</small></span><input type="file" name="materialFiles" multiple onChange={(event) => { const files = Array.from(event.target.files ?? []); setSelectedFileNames(files.map((file) => file.name)); if (files.length > 10) setResourceError("Choose up to 10 files at a time."); else if (files.some((file) => file.size > 16 * 1024 * 1024)) setResourceError("Each file must be 16 MB or smaller."); else setResourceError(""); }} /></span></label>
+        {initialAttachments.length > 0 && <div className="material-current-files"><span className="field-label">Current uploaded files</span><small>{initialAttachments.map((file) => file.name).join(", ")}</small><small>Uploading new files replaces the current uploaded files.</small></div>}
         <div className="or-divider"><span>OR ADD A LINK</span></div>
         <Field label="Resource URL"><input type="url" name="materialUrl" value={resourceUrl} onChange={(event) => { setResourceUrl(event.target.value); setResourceError(""); }} placeholder="https://…" /></Field>
-        <p className="form-hint">Add either a resource URL or an uploaded file. You can leave the other option empty.</p>
+        <p className="form-hint">Add a resource URL or upload up to 10 files (16 MB each). Program Flow images appear inside their expanded session.</p>
         {resourceError && <p className="material-form-error" role="alert">{resourceError}</p>}
         <p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p>
         <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialMaterial ? "Save changes" : "Add material"}<ArrowRight size={16} /></button></div>

@@ -89,8 +89,9 @@ function makeUploadRouter(env) {
   const f = createUploadthing();
   return {
     materialUploader: f({
-      pdf: { maxFileSize: "16MB", maxFileCount: 1 },
-      blob: { maxFileSize: "16MB", maxFileCount: 1 },
+      pdf: { maxFileSize: "16MB", maxFileCount: 10 },
+      blob: { maxFileSize: "16MB", maxFileCount: 10 },
+      image: { maxFileSize: "16MB", maxFileCount: 10 },
     })
       .middleware(async ({ req }) => {
         const authorization = req.headers.get("authorization") || "";

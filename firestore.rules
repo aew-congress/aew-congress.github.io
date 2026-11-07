@@ -45,6 +45,13 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'regular');
     }
 
+    function isDesignatedJudge() {
+      return verified()
+        && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.judge == 'Yes'
+        && (isAdmin() || isRegularMember());
+    }
+
     function canConfirmEmailVerification(uid) {
       return signedIn()
         && request.auth.uid == uid
@@ -77,8 +84,9 @@ service cloud.firestore {
         ]);
       allow update: if canConfirmEmailVerification(uid)
         || (isSuperadmin()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'roleUpdatedAt', 'status', 'reviewedAt', 'judge'])
           && (!('role' in request.resource.data) || request.resource.data.role in ['superadmin', 'admin', 'regular'])
+          && (!('judge' in request.resource.data) || request.resource.data.judge in ['Yes', 'No'])
           && request.resource.data.status in ['Pending', 'Approved', 'Disapproved']
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) || resource.data.emailVerified == true));
       allow delete: if isSuperadmin();
@@ -90,7 +98,7 @@ service cloud.firestore {
     }
 
     match /materials/{materialId} {
-      allow read: if isAdmin() || isApprovedMember();
+      allow read: if isAdmin() || isApprovedMember() || resource.data.enabled == true;
       allow create, update, delete: if isAdmin();
     }
 
@@ -100,7 +108,7 @@ service cloud.firestore {
     }
 
     match /contestMechanics/{contestId} {
-      allow read: if isAdmin() || isApprovedMember();
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
@@ -120,6 +128,21 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.programId == request.resource.data.programId
         && get(/databases/$(database)/documents/contestMechanics/$(request.resource.data.contestId)).data.contest == request.resource.data.contest;
       allow update, delete: if isAdmin();
+    }
+
+    match /contestScoreSheets/{contestId}/judges/{judgeUid} {
+      allow get: if isSuperadmin() || (isDesignatedJudge() && judgeUid == request.auth.uid);
+      allow list: if isSuperadmin();
+      allow create, update: if isDesignatedJudge()
+        && judgeUid == request.auth.uid
+        && exists(/databases/$(database)/documents/contestMechanics/$(contestId))
+        && request.resource.data.keys().hasAll(['contestId', 'judgeUid', 'teams', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['contestId', 'judgeUid', 'teams', 'updatedAt'])
+        && request.resource.data.contestId == contestId
+        && request.resource.data.judgeUid == request.auth.uid
+        && request.resource.data.teams is list
+        && request.resource.data.teams.size() <= 50;
+      allow delete: if false;
     }
 
     match /attendanceConfirmations/{confirmationId} {

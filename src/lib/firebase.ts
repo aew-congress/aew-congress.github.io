@@ -53,6 +53,7 @@ export type ProgramSession = {
   responsibleNotApplicable?: boolean;
   responsible: ResponsiblePerson[] | string;
 };
+export type ProgramKeynoteTopic = { date: string; session: string; topic: string };
 export type Program = {
   id: string;
   eventTitle: string;
@@ -62,6 +63,8 @@ export type Program = {
   dateTo: string;
   venue: string;
   description?: string;
+  /** Optional for programs saved before keynote topics were added. */
+  keynoteTopics?: ProgramKeynoteTopic[];
   flow: ProgramSession[];
 };
 

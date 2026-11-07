@@ -702,3 +702,31 @@ img { -webkit-user-drag: none; user-select: none; }
 .manage-action-button--visible:hover { color: #405915; background: #e8f1d8; border-color: #cbd9b4; }
 .manage-action-button--hidden { color: #92988b; background: #f5f6f3; border-color: #e5e8df; }
 .manage-action-button--hidden:hover { color: #66705a; background: #edf0e9; border-color: #d7ddcc; }
+
+.editor-keynote-topics { padding: 12px 0 14px; border-top: 1px solid #e9ece5; }
+.editor-keynote-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; }
+.editor-keynote-head p { margin: 5px 0 0; color: #92988c; font-size: 11px; }
+.editor-keynote-head .text-action { flex: 0 0 auto; font-size: 12px; }
+.editor-keynote-topic-list { max-height: min(24vh, 210px); overflow-y: auto; border: 1px solid #e8ebe2; border-radius: 9px; }
+.editor-keynote-topic-row { display: grid; grid-template-columns: 25px minmax(130px, .85fr) minmax(190px, 1fr) minmax(200px, 1.25fr) 28px; gap: 8px; align-items: end; padding: 9px; border-bottom: 1px solid #edf0e9; }
+.editor-keynote-topic-row:last-child { border-bottom: 0; }
+.editor-keynote-topic-num { align-self: center; padding-bottom: 9px; color: #9ca48d; font-size: 10px; }
+.editor-keynote-topic-row input, .editor-keynote-topic-row select { width: 100%; min-width: 0; height: 38px; border: 1px solid #e6e9e1; border-radius: 8px; outline: 0; padding: 0 9px; background: #fcfdfa; color: #576048; font-size: 12px; }
+.editor-keynote-topic-row input:focus, .editor-keynote-topic-row select:focus { border-color: #aeba99; box-shadow: 0 0 0 3px #455e1510; }
+.editor-keynote-topic-row .remove-session { align-self: center; margin-bottom: 3px; }
+@media (max-width: 760px) {
+  .editor-keynote-topic-row { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 25px; gap: 7px; }
+  .editor-keynote-topic-num { grid-column: 1; grid-row: 1 / 3; }
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(1) { grid-column: 2; }
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(2) { grid-column: 3; }
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(3) { grid-column: 2 / 4; }
+  .editor-keynote-topic-row .remove-session { grid-column: 4; grid-row: 1; }
+}
+@media (max-width: 500px) {
+  .editor-keynote-topic-row { grid-template-columns: 22px minmax(0, 1fr) 25px; }
+  .editor-keynote-topic-num { grid-row: 1 / 4; }
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(1),
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(2),
+  .editor-keynote-topic-row > .session-edit-field:nth-of-type(3) { grid-column: 2; }
+  .editor-keynote-topic-row .remove-session { grid-column: 3; }
+}

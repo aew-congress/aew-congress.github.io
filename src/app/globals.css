@@ -504,3 +504,46 @@ img { -webkit-user-drag: none; user-select: none; }
   .auth-policy-copy p { font-size: 12px; }
   .auth-policy-actions .button { flex: 1; padding-inline: 8px; font-size: 11px; }
 }
+
+.confirmed-attendees-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 10px; }
+.confirmed-attendees-controls .confirmed-attendees-program { min-width: min(270px, 100%); }
+.confirmed-attendees-print { height: 39px; white-space: nowrap; }
+@media (max-width: 760px) {
+  .confirmed-attendees-controls { width: 100%; }
+  .confirmed-attendees-controls .confirmed-attendees-program { flex: 1; min-width: 0; width: auto; }
+}
+@media (max-width: 480px) {
+  .confirmed-attendees-controls { gap: 7px; }
+  .confirmed-attendees-print { padding-inline: 10px; }
+}
+@page { size: A4 landscape; margin: 12mm; }
+@media print {
+  html, body { height: auto !important; min-height: 0 !important; }
+  nextjs-portal { display: none !important; }
+  .site-shell--confirmed-attendees { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible; background: #fff; }
+  .site-shell--confirmed-attendees .topbar,
+  .site-shell--confirmed-attendees .confirmed-attendees-controls,
+  .site-shell--confirmed-attendees .confirmed-attendees-page .table-footnote { display: none !important; }
+  .site-shell--confirmed-attendees main { height: auto !important; min-height: 0 !important; padding: 0 !important; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page { width: 100%; height: auto !important; min-height: 0 !important; max-height: none !important; max-width: none; margin: 0; padding: 0; color: #222; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .section-heading { align-items: flex-end; margin: 0 0 7mm; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .section-heading h2 { margin-bottom: 2mm; font-size: 22pt; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .section-heading p,
+  .site-shell--confirmed-attendees .confirmed-attendees-page .panel-heading p { color: #555; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .approval-panel { overflow: visible; border: 1px solid #c9cfc2; border-radius: 0; box-shadow: none; break-inside: auto; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .panel-heading { padding: 5mm; border-bottom: 1px solid #dfe3dc; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .panel-heading h2 { font-size: 17pt; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .approval-table-wrap { overflow: visible; border: 0; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table { width: 100%; min-width: 0; table-layout: fixed; font-size: 9pt; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table thead { display: table-header-group; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th,
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table td { min-width: 0 !important; padding: 2.5mm 2mm; border-bottom: 1px solid #dfe3dc; overflow-wrap: anywhere; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(1) { width: 20%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(2) { width: 14%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(3) { width: 15%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(4) { width: 18%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(5) { width: 21%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(6) { width: 12%; }
+  .site-shell--confirmed-attendees .confirmed-attendees-page .empty-table { height: auto !important; padding: 14mm 2mm !important; }
+}

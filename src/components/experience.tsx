@@ -1073,7 +1073,7 @@ export default function Experience() {
 
   return (
     <div
-      className="site-shell"
+      className={`site-shell${section === "confirmedAttendees" ? " site-shell--confirmed-attendees" : ""}`}
       onDragStartCapture={(event) => {
         if (event.target instanceof HTMLImageElement) event.preventDefault();
       }}
@@ -1398,10 +1398,15 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
   return <div className="content-wrap dashboard-page confirmed-attendees-page">
     <div className="section-heading">
       <div><span className="eyebrow">ADMIN WORKSPACE</span><h2>Confirmed <span>Attendees</span></h2><p>Regular users who confirmed they plan to attend.</p></div>
-      <label className="confirmed-attendees-program"><span>Program</span><select value={selectedProgramId} onChange={(event) => onSelectProgram(event.target.value)} disabled={!programs.length}>
-        {!programs.length && <option value="">No programs available</option>}
-        {programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}
-      </select></label>
+      <div className="confirmed-attendees-controls">
+        <label className="confirmed-attendees-program"><span>Program</span><select value={selectedProgramId} onChange={(event) => onSelectProgram(event.target.value)} disabled={!programs.length}>
+          {!programs.length && <option value="">No programs available</option>}
+          {programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}
+        </select></label>
+        <button type="button" className="button button--soft confirmed-attendees-print" onClick={() => window.print()} disabled={!selectedProgram}>
+          <Printer size={15} /> Print
+        </button>
+      </div>
     </div>
     <section className="approval-panel">
       <div className="panel-heading"><div><span className="eyebrow">ATTENDANCE</span><h2>{selectedProgram?.eventTitle ?? "Program attendees"}</h2><p>{selectedProgram ? "Confirmed attendance for this program." : "Publish a program to collect attendance confirmations."}</p></div><span className="confirmed-attendees-count">{attendees.length} {attendees.length === 1 ? "attendee" : "attendees"}</span></div>

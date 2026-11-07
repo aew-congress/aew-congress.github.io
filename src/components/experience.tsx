@@ -211,6 +211,42 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
   return <button className="icon-button" aria-label={label} title={label} onClick={onClick}>{children}</button>;
 }
 
+function LoadingProgressScreen({ startedAt, fadeOut, showPercentage }: { startedAt: number | null; fadeOut: boolean; showPercentage: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!showPercentage || startedAt === null) return;
+    const timer = window.setInterval(() => {
+      const currentTime = Date.now();
+      setNow(currentTime);
+      if (currentTime >= startedAt + 5_000) window.clearInterval(timer);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [showPercentage, startedAt]);
+
+  const progress = startedAt === null ? 30 : Math.min(100, 30 + Math.floor(Math.max(0, now - startedAt) / 5_000 * 70));
+
+  return (
+    <div className={`loading-progress-screen${fadeOut ? " is-fading-out" : ""}`} role="status" aria-label="Loading AEW Congress">
+      <div className="loading-progress-content">
+        <div className="loading-progress-brand" aria-hidden="true">
+          <span className="loading-progress-logo"><img src="/AEW_logo_1.png" alt="" /></span>
+          <span className="loading-progress-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
+        </div>
+        {showPercentage && (
+          <div className="loading-progress-value" role="progressbar" aria-label="Loading AEW Congress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={`${progress}%`} aria-live="polite">
+            <span>{progress}</span><small>%</small>
+          </div>
+        )}
+        <div className="loading-progress-track" aria-hidden="true">
+          <span style={{ transform: `scaleX(${showPercentage ? progress / 100 : 0.3})` }} />
+        </div>
+        <p className="loading-progress-caption"><span className="loading-progress-dot" />Preparing the congress experience</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Experience() {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [contestMechanics, setContestMechanics] = useState<ContestMechanics[]>([]);
@@ -257,6 +293,10 @@ export default function Experience() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [cloudIssue, setCloudIssue] = useState("");
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null);
+  const [loadingFadeOut, setLoadingFadeOut] = useState(false);
+  const [loadingScreenVisible, setLoadingScreenVisible] = useState(true);
   const authActionInProgress = useRef(false);
 
   const isSuperadmin = Boolean(user && user.emailVerified && (user.email?.toLowerCase() === SUPERADMIN_EMAIL || profileRole(activeProfile ?? {}) === "superadmin"));
@@ -358,62 +398,92 @@ export default function Experience() {
       setLoading(false);
     }, (error) => { setCloudIssue(errorText(error)); setLoading(false); });
     const stopAuth = onAuthStateChanged(auth, async (current) => {
-      if (!current) { setUser(null); setActiveProfile(null); return; }
-      // Login and registration handle verification and approval in sequence. Avoid
-      // racing those flows with the background session guard.
-      if (authActionInProgress.current) { setUser(current); return; }
+      setLoadingStartedAt((startedAt) => startedAt ?? Date.now());
       try {
-        await current.reload();
-        await current.getIdToken(true);
-      } catch { /* A later sign-in will retry the verification refresh. */ }
-      setUser(current);
-      if (current.email?.toLowerCase() === SUPERADMIN_EMAIL) {
-        if (current.emailVerified) setActiveProfile(null);
-        else {
-          await signOut(auth);
-          setToast({ kind: "info", text: "Verify the superadmin email address before using admin tools." });
-        }
-        return;
-      }
-      try {
-        const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
-        if (!profileSnapshot.exists()) { await signOut(auth); return; }
-        const profile = profileSnapshot.data() as UserProfile;
-        if (profileRole(profile) === "superadmin" || profileRole(profile) === "admin") {
-          if (!current.emailVerified) {
+        if (!current) { setUser(null); setActiveProfile(null); return; }
+        // Login and registration handle verification and approval in sequence. Avoid
+        // racing those flows with the background session guard.
+        if (authActionInProgress.current) { setUser(current); return; }
+        try {
+          await current.reload();
+          await current.getIdToken(true);
+        } catch { /* A later sign-in will retry the verification refresh. */ }
+        setUser(current);
+        if (current.email?.toLowerCase() === SUPERADMIN_EMAIL) {
+          if (current.emailVerified) setActiveProfile(null);
+          else {
             await signOut(auth);
-            setToast({ kind: "info", text: "Verify your email address before using admin tools." });
+            setToast({ kind: "info", text: "Verify the superadmin email address before using admin tools." });
+          }
+          return;
+        }
+        try {
+          const profileSnapshot = await getDoc(doc(db, "userProfiles", current.uid));
+          if (!profileSnapshot.exists()) { await signOut(auth); return; }
+          const profile = profileSnapshot.data() as UserProfile;
+          if (profileRole(profile) === "superadmin" || profileRole(profile) === "admin") {
+            if (!current.emailVerified) {
+              await signOut(auth);
+              setToast({ kind: "info", text: "Verify your email address before using admin tools." });
+              return;
+            }
+            setActiveProfile(profile);
             return;
           }
-          setActiveProfile(profile);
-          return;
-        }
-        if (!current.emailVerified) {
-          setActiveProfile(profile);
-          setToast({ kind: "info", text: "Verify your email to add your account to the superadmin approval queue." });
-          return;
-        }
-        const verifiedProfile = {
-          ...profile,
-          emailVerified: true,
-          status: profile.status === "Unverified" ? "Pending" as const : profile.status,
-        };
-        if (profile.emailVerified !== true || verifiedProfile.status !== profile.status) {
-          await updateDoc(doc(db, "userProfiles", current.uid), {
+          if (!current.emailVerified) {
+            setActiveProfile(profile);
+            setToast({ kind: "info", text: "Verify your email to add your account to the superadmin approval queue." });
+            return;
+          }
+          const verifiedProfile = {
+            ...profile,
             emailVerified: true,
-            status: verifiedProfile.status,
-          });
-        }
-        setActiveProfile(verifiedProfile);
-        if (verifiedProfile.status !== "Approved") {
-          await signOut(auth);
-          if (verifiedProfile.status === "Pending") setToast({ kind: "info", text: "Awaiting Approval for Admin. Your verified account is pending admin approval." });
-          else if (verifiedProfile.status === "Disapproved") setToast({ kind: "error", text: "This account was not approved. Contact your office administrator for assistance." });
-        }
-      } catch { setActiveProfile(null); }
+            status: profile.status === "Unverified" ? "Pending" as const : profile.status,
+          };
+          if (profile.emailVerified !== true || verifiedProfile.status !== profile.status) {
+            await updateDoc(doc(db, "userProfiles", current.uid), {
+              emailVerified: true,
+              status: verifiedProfile.status,
+            });
+          }
+          setActiveProfile(verifiedProfile);
+          if (verifiedProfile.status !== "Approved") {
+            await signOut(auth);
+            if (verifiedProfile.status === "Pending") setToast({ kind: "info", text: "Awaiting Approval for Admin. Your verified account is pending admin approval." });
+            else if (verifiedProfile.status === "Disapproved") setToast({ kind: "error", text: "This account was not approved. Contact your office administrator for assistance." });
+          }
+        } catch { setActiveProfile(null); }
+      } finally {
+        setAuthReady(true);
+      }
+    }, () => {
+      setLoadingStartedAt((startedAt) => startedAt ?? Date.now());
+      setAuthReady(true);
     });
     return () => { stopPrograms(); stopAuth(); };
   }, []);
+
+  useEffect(() => {
+    if (!authReady || loading || !loadingScreenVisible || loadingStartedAt === null) return;
+    if (!user?.emailVerified) {
+      setLoadingScreenVisible(false);
+      return;
+    }
+
+    const revealAt = loadingStartedAt + 7_000;
+    const revealDelay = Math.max(0, revealAt - Date.now());
+    let fadeEndTimer: number | undefined;
+    const revealTimer = window.setTimeout(() => {
+      setLoadingFadeOut(true);
+      const fadeDuration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 3_000;
+      fadeEndTimer = window.setTimeout(() => setLoadingScreenVisible(false), fadeDuration);
+    }, revealDelay);
+
+    return () => {
+      window.clearTimeout(revealTimer);
+      if (fadeEndTimer !== undefined) window.clearTimeout(fadeEndTimer);
+    };
+  }, [authReady, loading, loadingScreenVisible, loadingStartedAt, user?.emailVerified]);
 
   useEffect(() => {
     if (!user || user.emailVerified) return;
@@ -1197,8 +1267,11 @@ export default function Experience() {
   ];
 
   return (
+    <>
     <div
       className={`site-shell${section === "confirmedAttendees" ? " site-shell--confirmed-attendees" : ""}`}
+      inert={loadingScreenVisible}
+      aria-busy={loadingScreenVisible}
       onDragStartCapture={(event) => {
         if (event.target instanceof HTMLImageElement) event.preventDefault();
       }}
@@ -1291,6 +1364,8 @@ export default function Experience() {
       {deleteTarget && <DeleteConfirmModal target={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteContent} />}
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
+    {loadingScreenVisible && <LoadingProgressScreen startedAt={loadingStartedAt} fadeOut={loadingFadeOut} showPercentage={Boolean(user?.emailVerified)} />}
+    </>
   );
 }
 

@@ -1902,21 +1902,25 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
   const [category, setCategory] = useState("All resources");
   const [program, setProgram] = useState("All programs");
   const [queryText, setQueryText] = useState("");
-  const [dailyFilter, setDailyFilter] = useState("All days");
+  const [dailyIndex, setDailyIndex] = useState(0);
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
   const availableMaterials = isAdmin ? materials : materials.filter((material) => material.enabled !== false);
   const dailyOptions = useMemo(() => {
     const selectedPrograms = program === "All programs" ? programs : programs.filter((item) => item.id === program);
     return Array.from(new Set(selectedPrograms.flatMap((item) => dateOptionsBetween(item.dateFrom, item.dateTo)))).sort();
   }, [program, programs]);
+  const selectedDailyIndex = dailyOptions.length ? Math.min(dailyIndex, dailyOptions.length - 1) : 0;
+  const selectedDailyDate = dailyOptions[selectedDailyIndex] ?? "";
+  const dailyWindowStart = Math.min(Math.max(0, selectedDailyIndex - 1), Math.max(0, dailyOptions.length - 3));
+  const visibleDayTabs = dailyOptions.slice(dailyWindowStart, dailyWindowStart + 3).map((date) => ({ date, index: dailyOptions.indexOf(date) }));
   const displayed = availableMaterials.filter((material) =>
     (category === "All resources" || material.category === category)
     && (program === "All programs" || material.programId === program)
     && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""}`.toLowerCase().includes(queryText.toLowerCase()))
   );
   const presentationMaterials = displayed.filter((material) => material.category === "Presentation");
-  const dailyPresentationMaterials = isRegularMember && category === "Presentation" && dailyFilter !== "All days"
-    ? presentationMaterials.filter((material) => programs.find((item) => item.id === material.programId)?.keynoteTopics?.some((item) => item.date === dailyFilter && item.topic.trim() === material.topic?.trim()) ?? false)
+  const dailyPresentationMaterials = isRegularMember && category === "Presentation" && selectedDailyDate
+    ? presentationMaterials.filter((material) => programs.find((item) => item.id === material.programId)?.keynoteTopics?.some((item) => item.date === selectedDailyDate && item.topic.trim() === material.topic?.trim()) ?? false)
     : presentationMaterials;
   const presentationTopicGroups = Array.from(new Set(dailyPresentationMaterials.map((material) => material.topic?.trim() || "Other presentations"))).map((topic) => ({
     topic,
@@ -1929,11 +1933,11 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
     <section className="materials-hero"><div><span className="eyebrow"><FileCheck2 size={14} /> THE RESOURCE SHELF</span><h1>Useful things,<br /><span>within</span> <i>reach.</i></h1><p>Program flows, communication letters, presentations, guides, worksheets, and references shared by the Caraga extension community.</p></div><div className="materials-hero-art"><span className="paper paper--one"><FileText size={22} /><b>FIELD<br />GUIDE</b><i /></span><span className="paper paper--two"><span>01</span><strong>Learn<br />by doing.</strong><i /></span><span className="paper paper--three"><Sparkles size={16} /><small>SHARED<br />KNOWLEDGE</small></span></div></section>
     <div className="resource-toolbar">
       <label className="search-box"><Search size={16} /><input value={queryText} onChange={(event) => setQueryText(event.target.value)} placeholder="Search materials" aria-label="Search materials" /></label>
-      <label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => { setProgram(event.target.value); setDailyFilter("All days"); }} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>
+      <label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => { setProgram(event.target.value); setDailyIndex(0); }} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>
       {isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add material</button>}
     </div>
-    <div className="resource-categories">{["All resources", ...categories].map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation") setDailyFilter("All days"); }}>{item}<span>{item === "All resources" ? availableMaterials.length : availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
-    {isPresentationMemberView && <div className="presentation-daily-filter-wrap"><label className="presentation-daily-filter"><span>Daily Filter</span><span className="presentation-daily-select"><CalendarDays size={15} /><select value={dailyFilter} onChange={(event) => setDailyFilter(event.target.value)} aria-label="Daily Filter"><option value="All days">All days</option>{dailyOptions.map((date) => <option key={date} value={date}>{displayDate(date)}</option>)}</select><ChevronDown size={13} /></span></label></div>}
+    <div className="resource-categories">{["All resources", ...categories].map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation") setDailyIndex(0); }}>{item}<span>{item === "All resources" ? availableMaterials.length : availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
+    {isPresentationMemberView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
     {isPresentationMemberView ? <section className="presentation-topic-library" aria-label="Presentation topics">
       <div className="presentation-topics-heading"><span className="eyebrow">TOPIC</span><p>Choose a topic to view and download its materials.</p></div>
       <div className="presentation-topic-list">
@@ -1957,7 +1961,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
             </article>)}</div>}
           </section>;
         })}
-        {!presentationTopicGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PRESENTATIONS</span><h2>{loading ? "Gathering presentations…" : dailyFilter === "All days" ? "No presentations are available yet." : "No presentations for this day."}</h2><p>{loading ? "Topic materials will appear here." : "When a presentation is shared for this topic or day, you’ll find it here."}</p></div>}
+        {!presentationTopicGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PRESENTATIONS</span><h2>{loading ? "Gathering presentations…" : selectedDailyDate ? "No presentations for this day." : "No presentations are available yet."}</h2><p>{loading ? "Topic materials will appear here." : "When a presentation is shared for this topic or day, you’ll find it here."}</p></div>}
       </div>
     </section> : <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />{isAdmin && material.enabled === false ? "Hidden from regular users" : "Available to all members"}</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}

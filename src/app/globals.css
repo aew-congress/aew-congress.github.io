@@ -731,10 +731,15 @@ img { -webkit-user-drag: none; user-select: none; }
   .editor-keynote-topic-row .remove-session { grid-column: 3; }
 }
 
-.presentation-daily-filter-wrap { display: flex; justify-content: flex-start; margin: -7px 0 17px; }
-.presentation-daily-filter { display: grid; gap: 5px; width: min(270px, 100%); color: #7c8374; font-size: 10px; font-weight: 750; letter-spacing: .08em; }
-.presentation-daily-select { display: flex; align-items: center; gap: 8px; height: 39px; padding: 0 10px; border: 1px solid #e2e6da; border-radius: 8px; background: #fff; color: #829064; }
-.presentation-daily-select select { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; appearance: none; background: transparent; color: #576048; font-size: 12px; font-weight: 500; letter-spacing: normal; cursor: pointer; }
+.presentation-daily-filter-wrap { display: grid; gap: 8px; margin: -7px 0 17px; }
+.presentation-daily-filter-label { color: #7c8374; font-size: 10px; font-weight: 750; letter-spacing: .08em; }
+.presentation-day-controls { width: 100%; justify-content: flex-start; gap: 12px; }
+.presentation-day-controls .day-arrow { flex: 0 0 58px; width: 58px; height: 58px; border-radius: 17px; }
+.presentation-day-tabs { flex: 0 1 auto; justify-content: flex-start; gap: 9px; overflow-x: auto; scrollbar-width: none; }
+.presentation-day-tabs::-webkit-scrollbar { display: none; }
+.presentation-day-tab { flex: 0 0 174px; min-width: 174px; height: 80px; gap: 8px; border-radius: 18px; }
+.presentation-day-tab span { font-size: 17px; }
+.presentation-day-tab small { font-size: 16px; }
 .presentation-topics-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 9px; }
 .presentation-topics-heading .eyebrow { color: #858d78; font-size: 10px; }
 .presentation-topics-heading p { margin: 0; color: #92988c; font-size: 11px; }
@@ -756,7 +761,12 @@ img { -webkit-user-drag: none; user-select: none; }
 .presentation-download-button { flex: 0 0 auto; min-height: 33px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid #dce5cf; border-radius: 8px; background: #f8faf4; color: var(--olive); font-size: 11px; font-weight: 750; cursor: pointer; }
 .presentation-download-button:hover { border-color: #bdcda1; background: #eef4e4; }
 @media (max-width: 760px) {
-  .presentation-daily-filter { width: 100%; }
+  .presentation-day-controls { gap: 7px; }
+  .presentation-day-controls .day-arrow { flex-basis: 38px; width: 38px; height: 38px; border-radius: 12px; }
+  .presentation-day-tabs { flex: 1 1 auto; min-width: 0; }
+  .presentation-day-tab { flex: 1 0 80px; min-width: 80px; height: 64px; gap: 5px; border-radius: 14px; padding-inline: 4px; }
+  .presentation-day-tab span { font-size: 11px; }
+  .presentation-day-tab small { font-size: 11px; }
   .presentation-topics-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .presentation-topic-toggle { grid-template-columns: minmax(0, 1fr) auto 18px; gap: 8px; padding-inline: 12px; }
   .presentation-topic-materials { padding-inline: 10px; }

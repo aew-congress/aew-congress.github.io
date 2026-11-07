@@ -145,6 +145,54 @@ function makeUploadRouter(env) {
         key: file.key,
         uploadedBy: metadata.uid,
       })),
+    speakerImageUploader: f({
+      image: { maxFileSize: "8MB", maxFileCount: 1 },
+    })
+      .middleware(async ({ req }) => {
+        const authorization = req.headers.get("authorization") || "";
+        const idToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+        if (!idToken) throw new UploadThingError("Sign in with an admin account to upload speaker photos.");
+
+        let authResponse;
+        try {
+          authResponse = await fetch("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + encodeURIComponent(env.FIREBASE_API_KEY), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ idToken }),
+          });
+        } catch {
+          throw new UploadThingError("We could not verify your account. Please try again.");
+        }
+
+        if (!authResponse.ok) throw new UploadThingError("Your session has expired. Sign in again and retry.");
+        const authPayload = await authResponse.json();
+        const account = authPayload.users?.[0];
+        if (!account || account.disabled || !account.emailVerified) {
+          throw new UploadThingError("Verify your email address before uploading.");
+        }
+
+        let isAdmin = String(account.email || "").toLowerCase() === "rjamescute2@gmail.com";
+        if (!isAdmin) {
+          let profileResponse;
+          try {
+            const profileUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(env.FIREBASE_PROJECT_ID)}/databases/(default)/documents/userProfiles/${encodeURIComponent(account.localId)}`;
+            profileResponse = await fetch(profileUrl, { headers: { authorization: `Bearer ${idToken}` } });
+          } catch {
+            throw new UploadThingError("We could not verify admin access. Please try again.");
+          }
+          if (!profileResponse.ok) throw new UploadThingError("Only admins can upload speaker photos.");
+          const profile = await profileResponse.json();
+          isAdmin = ["admin", "superadmin"].includes(profile.fields?.role?.stringValue);
+        }
+        if (!isAdmin) throw new UploadThingError("Only admins can upload speaker photos.");
+        return { uid: account.localId };
+      })
+      .onUploadComplete(({ file, metadata }) => ({
+        url: file.ufsUrl,
+        name: file.name,
+        key: file.key,
+        uploadedBy: metadata.uid,
+      })),
   };
 }
 

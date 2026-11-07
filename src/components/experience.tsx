@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
@@ -14,13 +14,13 @@ import {
   EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
-type Section = "home" | "programs" | "contests" | "contestMechanics" | "materials" | "approval" | "manage" | "confirmedAttendees";
+type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
-type DeleteTarget = { kind: "program" | "material" | "mechanics"; id: string; label: string };
+type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
 
 function displayDate(date: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }) {
   if (!date) return "Date to be announced";
@@ -212,6 +212,8 @@ export default function Experience() {
   const [joinedContestStatuses, setJoinedContestStatuses] = useState<Record<string, string>>({});
   const [confirmingJoinId, setConfirmingJoinId] = useState("");
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [speakers, setSpeakers] = useState<SpeakerProfileCard[]>([]);
+  const [speakersLoading, setSpeakersLoading] = useState(true);
   const [attendanceConfirmations, setAttendanceConfirmations] = useState<AttendanceConfirmation[]>([]);
   const [attendanceConfirmationsLoading, setAttendanceConfirmationsLoading] = useState(false);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -234,9 +236,11 @@ export default function Experience() {
   const [programModal, setProgramModal] = useState(false);
   const [contestMechanicsModal, setContestMechanicsModal] = useState(false);
   const [materialModal, setMaterialModal] = useState(false);
+  const [speakerModal, setSpeakerModal] = useState(false);
   const [editingProgram, setEditingProgram] = useState<Program | null>(null);
   const [editingMechanics, setEditingMechanics] = useState<ContestMechanics | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [editingSpeaker, setEditingSpeaker] = useState<SpeakerProfileCard | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [contestMechanicsLoading, setContestMechanicsLoading] = useState(true);
@@ -441,6 +445,14 @@ export default function Experience() {
   }, [signedIn]);
 
   useEffect(() => {
+    const stopSpeakers = onSnapshot(collection(db, "speakers"), (snapshot) => {
+      setSpeakers(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as SpeakerProfileCard)).sort((a, b) => a.name.localeCompare(b.name)));
+      setSpeakersLoading(false);
+    }, (error) => { setCloudIssue(errorText(error)); setSpeakersLoading(false); });
+    return stopSpeakers;
+  }, []);
+
+  useEffect(() => {
     if (!signedIn) {
       setContestMechanics([]);
       setContestMechanicsLoading(false);
@@ -591,6 +603,7 @@ export default function Experience() {
   function openProgramEditor(program: Program | null = null) { setEditingProgram(program); setProgramModal(true); }
   function openMaterialEditor(material: Material | null = null) { setEditingMaterial(material); setMaterialModal(true); }
   function openMechanicsEditor(mechanics: ContestMechanics | null = null) { setEditingMechanics(mechanics); setContestMechanicsModal(true); }
+  function openSpeakerEditor(speaker: SpeakerProfileCard | null = null) { setEditingSpeaker(speaker); setSpeakerModal(true); }
 
   async function getVerifiedAdmin() {
     const current = auth.currentUser;
@@ -888,6 +901,73 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
+  async function createSpeaker(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user || !isAdmin) { setToast({ kind: "error", text: "Only verified admins can manage speaker profiles." }); return; }
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    let adminUser: User;
+    try { adminUser = await getVerifiedAdmin(); }
+    catch (error) { showError(error); return; }
+
+    const program = programs.find((item) => item.id === String(form.get("programId")));
+    if (!program) { setToast({ kind: "error", text: "Choose a saved program for this speaker." }); return; }
+    const name = String(form.get("name") ?? "").trim().replace(/\s+/g, " ");
+    const designation = String(form.get("designation") ?? "").trim();
+    const office = String(form.get("office") ?? "").trim();
+    let affiliations: SpeakerAffiliation[] = [];
+    let topics: string[] = [];
+    try {
+      const enteredAffiliations = (JSON.parse(String(form.get("affiliationsJson"))) as SpeakerAffiliation[]).map((item) => ({
+        position: String(item.position ?? "").trim(),
+        organization: String(item.organization ?? "").trim(),
+      }));
+      const enteredTopics = (JSON.parse(String(form.get("topicsJson"))) as string[]).map((topic) => String(topic ?? "").trim());
+      if (enteredAffiliations.some((item) => Boolean(item.position) !== Boolean(item.organization))) {
+        setToast({ kind: "error", text: "Complete each position with its organization." });
+        return;
+      }
+      affiliations = enteredAffiliations.filter((item) => item.position && item.organization);
+      topics = enteredTopics.filter(Boolean);
+    } catch { /* Validation below reports incomplete entries. */ }
+    if (!name || !designation || !office) {
+      setToast({ kind: "error", text: "Complete the speaker name, designation, and office." });
+      return;
+    }
+
+    const imageFile = form.get("speakerImage");
+    let imageUrl = editingSpeaker?.imageUrl ?? "";
+    let imageKey = editingSpeaker?.imageKey ?? "";
+    if (imageFile instanceof File && imageFile.size > 0) {
+      if (!imageFile.type.startsWith("image/")) { setToast({ kind: "error", text: "Choose an image file for the speaker profile." }); return; }
+      if (imageFile.size > 8 * 1024 * 1024) { setToast({ kind: "error", text: "Speaker images must be 8 MB or smaller." }); return; }
+      setUploadBusy(true);
+      try {
+        const result = await uploadFiles("speakerImageUploader", {
+          files: [imageFile],
+          headers: async () => ({ Authorization: `Bearer ${await adminUser.getIdToken()}` }),
+        });
+        imageUrl = result[0]?.ufsUrl ?? "";
+        imageKey = result[0]?.key ?? "";
+      } catch (error) { setUploadBusy(false); showError(error); return; }
+      setUploadBusy(false);
+    }
+    if (!imageUrl) { setToast({ kind: "error", text: "Upload a profile image before saving this speaker." }); return; }
+
+    try {
+      const payload = { programId: program.id, imageUrl, imageKey, name, designation, office, affiliations, topics, updatedAt: serverTimestamp() };
+      if (editingSpeaker) {
+        await updateDoc(doc(db, "speakers", editingSpeaker.id), payload);
+      } else {
+        await addDoc(collection(db, "speakers"), { ...payload, createdAt: serverTimestamp(), createdBy: adminUser.uid });
+      }
+      formElement.reset();
+      setSpeakerModal(false);
+      setEditingSpeaker(null);
+      setToast({ kind: "success", text: editingSpeaker ? "Speaker profile updated." : "Speaker profile published." });
+    } catch (error) { showError(error); }
+  }
+
   async function createContestMechanics(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !isAdmin) {
@@ -1016,16 +1096,18 @@ export default function Experience() {
       await getVerifiedAdmin();
       let refs: Array<{ collectionName: string; id: string }> = [];
       if (deleteTarget.kind === "program") {
-        const [materialDocs, mechanicsDocs, joinDocs] = await Promise.all([
+        const [materialDocs, mechanicsDocs, joinDocs, speakerDocs] = await Promise.all([
           getDocs(query(collection(db, "materials"), where("programId", "==", deleteTarget.id))),
           getDocs(query(collection(db, "contestMechanics"), where("programId", "==", deleteTarget.id))),
           getDocs(query(collection(db, "contestJoins"), where("programId", "==", deleteTarget.id))),
+          getDocs(query(collection(db, "speakers"), where("programId", "==", deleteTarget.id))),
         ]);
         refs = [
           { collectionName: "programs", id: deleteTarget.id },
           ...materialDocs.docs.map((entry) => ({ collectionName: "materials", id: entry.id })),
           ...mechanicsDocs.docs.map((entry) => ({ collectionName: "contestMechanics", id: entry.id })),
           ...joinDocs.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id })),
+          ...speakerDocs.docs.map((entry) => ({ collectionName: "speakers", id: entry.id })),
         ];
       } else if (deleteTarget.kind === "mechanics") {
         const joinDocs = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", deleteTarget.id)));
@@ -1034,7 +1116,7 @@ export default function Experience() {
           ...joinDocs.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id })),
         ];
       } else {
-        refs = [{ collectionName: "materials", id: deleteTarget.id }];
+        refs = [{ collectionName: deleteTarget.kind === "speaker" ? "speakers" : "materials", id: deleteTarget.id }];
       }
       for (let start = 0; start < refs.length; start += 450) {
         const batch = writeBatch(db);
@@ -1042,9 +1124,11 @@ export default function Experience() {
         await batch.commit();
       }
       if (deleteTarget.kind === "program") {
-        setToast({ kind: "success", text: "Program and its related materials, contests, and joins were deleted." });
+        setToast({ kind: "success", text: "Program and its related content were deleted." });
       } else if (deleteTarget.kind === "mechanics") {
         setToast({ kind: "success", text: "Contest mechanics and associated joins were deleted." });
+      } else if (deleteTarget.kind === "speaker") {
+        setToast({ kind: "success", text: "Speaker profile deleted." });
       } else {
         setToast({ kind: "success", text: "Material removed from the library." });
       }
@@ -1065,7 +1149,7 @@ export default function Experience() {
     ...(isApprovedMember ? [{ id: "programs" as Section, label: "Programs" }] : []),
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
-    ...(signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
+    ...(isAdmin ? [{ id: "speakers" as Section, label: "Speakers" }] : signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage content" }] : []),
     ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
     ...(isSuperadmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
@@ -1106,11 +1190,13 @@ export default function Experience() {
           <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
           <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={(contest) => setContestJoinConfirm(contest)} />
+        ) : section === "speakers" ? (
+          <SpeakersPage speakers={speakers} programs={programs} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
           <>
-            {section === "home" && <HomeLanding program={currentYearProgram} currentYear={currentYear} loading={loading} onExplorePrograms={() => setSection("programs")} onMemberAccess={() => { if (signedIn) setSection("materials"); else { setAuthMode("login"); setAuthOpen(true); } }} />}
+            {section === "home" && <HomeLanding program={currentYearProgram} currentYear={currentYear} loading={loading} onExplorePrograms={() => setSection("programs")} onKnowSpeakers={() => setSection("speakers")} />}
 
             {section === "programs" && <>
             <section className="content-wrap program-section" id="program-list">
@@ -1160,13 +1246,114 @@ export default function Experience() {
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
       {materialModal && <MaterialModal key={editingMaterial?.id ?? "new-material"} programs={programs} initialMaterial={editingMaterial} onClose={() => { setMaterialModal(false); setEditingMaterial(null); }} onCreate={createMaterial} busy={uploadBusy} />}
+      {speakerModal && <SpeakerModal key={editingSpeaker?.id ?? "new-speaker"} programs={programs} initialSpeaker={editingSpeaker} onClose={() => { setSpeakerModal(false); setEditingSpeaker(null); }} onSave={createSpeaker} busy={uploadBusy} />}
       {deleteTarget && <DeleteConfirmModal target={deleteTarget} busy={deleteBusy} onClose={() => !deleteBusy && setDeleteTarget(null)} onConfirm={deleteContent} />}
       {toast && <div className={`toast toast--${toast.kind}`} role="status"><span className="toast-icon">{toast.kind === "success" ? <Check size={15} /> : toast.kind === "info" ? <CircleHelp size={15} /> : <X size={15} />}</span>{toast.text}<button aria-label="Dismiss notification" onClick={() => setToast(null)}><X size={15} /></button></div>}
     </div>
   );
 }
 
-function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMemberAccess }: { program: Program | null; currentYear: number; loading: boolean; onExplorePrograms: () => void; onMemberAccess: () => void }) {
+function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onDelete }: {
+  speakers: SpeakerProfileCard[];
+  programs: Program[];
+  isAdmin: boolean;
+  loading: boolean;
+  onAdd: () => void;
+  onEdit: (speaker: SpeakerProfileCard) => void;
+  onDelete: (speaker: SpeakerProfileCard) => void;
+}) {
+  const [programFilter, setProgramFilter] = useState("");
+  const [programFilterOpen, setProgramFilterOpen] = useState(false);
+  const [activeProgramOption, setActiveProgramOption] = useState(0);
+  const programFilterRef = useRef<HTMLDivElement>(null);
+  const programFilterTriggerRef = useRef<HTMLButtonElement>(null);
+  const programFilterOptions = [{ id: "", label: "All programs" }, ...programs.map((program) => ({ id: program.id, label: program.eventTitle }))];
+  const selectedProgramIndex = Math.max(0, programFilterOptions.findIndex((option) => option.id === programFilter));
+  const programsById = new Map(programs.map((program) => [program.id, program]));
+  const displayed = speakers.filter((speaker) => !programFilter || speaker.programId === programFilter);
+
+  useEffect(() => {
+    if (!programFilterOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!programFilterRef.current?.contains(event.target as Node)) setProgramFilterOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [programFilterOpen]);
+
+  function handleProgramFilterKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Escape" || event.key === "Tab") {
+      setProgramFilterOpen(false);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!programFilterOpen) {
+        setActiveProgramOption(selectedProgramIndex);
+        setProgramFilterOpen(true);
+      } else {
+        setActiveProgramOption((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + programFilterOptions.length) % programFilterOptions.length);
+      }
+      return;
+    }
+    if (event.key === "Home" || event.key === "End") {
+      if (!programFilterOpen) return;
+      event.preventDefault();
+      setActiveProgramOption(event.key === "Home" ? 0 : programFilterOptions.length - 1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!programFilterOpen) {
+        setActiveProgramOption(selectedProgramIndex);
+        setProgramFilterOpen(true);
+      } else {
+        const option = programFilterOptions[activeProgramOption];
+        if (option) setProgramFilter(option.id);
+        setProgramFilterOpen(false);
+      }
+    }
+  }
+
+  return <div className="content-wrap dashboard-page speakers-page">
+    <div className="section-heading speakers-heading">
+      <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know thy <span>Speakers</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
+      <div className="speakers-controls">
+        <div className="speakers-program-filter" ref={programFilterRef}>
+          <span id="speaker-program-filter-label">Program</span>
+          <button ref={programFilterTriggerRef} type="button" role="combobox" aria-autocomplete="none" className="speakers-filter-trigger" aria-labelledby="speaker-program-filter-label speaker-program-filter-value" aria-haspopup="listbox" aria-expanded={programFilterOpen} aria-controls="speaker-program-filter-options" aria-activedescendant={programFilterOpen ? `speaker-program-option-${activeProgramOption}` : undefined} onClick={() => { if (!programFilterOpen) setActiveProgramOption(selectedProgramIndex); setProgramFilterOpen((open) => !open); }} onKeyDown={handleProgramFilterKeyDown}>
+            <span id="speaker-program-filter-value">{programFilterOptions.find((option) => option.id === programFilter)?.label ?? "All programs"}</span><ChevronDown size={16} aria-hidden="true" />
+          </button>
+          {programFilterOpen && <div className="speakers-filter-menu" id="speaker-program-filter-options" role="listbox" aria-label="Programs">
+            {programFilterOptions.map((option, index) => <button className={`speakers-filter-option${index === activeProgramOption ? " speakers-filter-option--active" : ""}`} id={`speaker-program-option-${index}`} key={option.id || "all-programs"} type="button" role="option" aria-selected={option.id === programFilter} onMouseEnter={() => setActiveProgramOption(index)} onClick={() => { setProgramFilter(option.id); setProgramFilterOpen(false); programFilterTriggerRef.current?.focus(); }}>
+              <span>{option.label}</span>{option.id === programFilter && <Check size={16} aria-hidden="true" />}
+            </button>)}
+          </div>}
+        </div>
+        {isAdmin && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={16} /> Add speaker</button>}
+      </div>
+    </div>
+    <div className="speakers-count-row"><span>{String(displayed.length).padStart(2, "0")} SPEAKERS</span><i /> <span>{programFilter ? programsById.get(programFilter)?.eventTitle : "CARAGA REGION XIII"}</span></div>
+    <div className="speaker-card-grid">{displayed.map((speaker, index) => {
+      const program = programsById.get(speaker.programId);
+      return <article className="speaker-profile-card" key={speaker.id} style={{ animationDelay: `${index * 45}ms` }}>
+        <div className="speaker-profile-photo">
+          <img src={speaker.imageUrl} alt={`${speaker.name} profile`} loading="lazy" />
+          <span className="speaker-profile-program">{program?.eventTitle ?? "AEW Congress"}</span>
+          {isAdmin && <div className="speaker-profile-actions"><button type="button" aria-label={`Edit ${speaker.name}`} title="Edit profile" onClick={() => onEdit(speaker)}><Pencil size={15} /></button><button type="button" aria-label={`Delete ${speaker.name}`} title="Delete profile" onClick={() => onDelete(speaker)}><Trash2 size={15} /></button></div>}
+          <div className="speaker-profile-title"><span className="eyebrow">CONGRESS SPEAKER</span><h3>{speaker.name.toLocaleUpperCase()}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
+        </div>
+        <div className="speaker-profile-details">
+          {!!speaker.affiliations?.length && <section className="speaker-detail-section"><span>POSITION & ORGANIZATION</span><div className="speaker-affiliations">{speaker.affiliations.map((item, positionIndex) => <p key={`${item.position}-${item.organization}-${positionIndex}`}><strong>{item.position}</strong><i />{item.organization}</p>)}</div></section>}
+          {!!speaker.topics?.length && <section className="speaker-detail-section speaker-topics-section"><span>TOPICS</span><div className="speaker-topic-list">{speaker.topics.map((topic, topicIndex) => <span key={`${topic}-${topicIndex}`}>{topic}</span>)}</div></section>}
+        </div>
+      </article>;
+    })}</div>
+    {!displayed.length && <div className="speakers-empty"><span><UsersRound size={22} /></span><span className="eyebrow">A PLACE FOR EVERY VOICE</span><h2>{loading ? "Gathering speaker profiles…" : programFilter ? "No speakers for this program yet" : "Meet the speakers soon."}</h2><p>{loading ? "Saved speaker profiles will appear here." : programFilter ? "Choose another program or check back when speakers are added." : "Speaker profiles shared by the admin team will appear here."}</p>{isAdmin && !loading && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={15} /> Add the first speaker</button>}</div>}
+  </div>;
+}
+
+function HomeLanding({ program, currentYear, loading, onExplorePrograms, onKnowSpeakers }: { program: Program | null; currentYear: number; loading: boolean; onExplorePrograms: () => void; onKnowSpeakers: () => void }) {
   const eventTitle = program?.eventTitle || `AEW Congress ${currentYear}`;
   const eventDates = program?.dateFrom && program?.dateTo
     ? dateRange(program.dateFrom, program.dateTo)
@@ -1190,7 +1377,7 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
           <p>{eventDescription}</p>
           <div className="landing-hero-actions">
             <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
-            <button className="text-action" onClick={onMemberAccess}>Member access <ArrowRight size={16} /></button>
+            <button className="text-action" onClick={onKnowSpeakers}>Know the Speakers <ArrowRight size={16} /></button>
           </div>
           <div className="landing-event-facts">
             <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>{eventDates}</strong></span></div>
@@ -1562,12 +1749,50 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}><div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Link a resource or upload a file for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={handleSubmit}><Field label="Program"><select name="programId" required defaultValue={initialMaterial?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field><Field label="Category"><select name="category" defaultValue={initialMaterial?.category ?? "Guidelines"}>{categories.map((category) => <option key={category}>{category}</option>)}</select></Field><Field label="Material name"><input name="materialName" defaultValue={initialMaterial?.name ?? ""} placeholder="e.g. Participant guide" /></Field><label className="field"><span className="field-label">Upload a file</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedFileName || "Choose a file"}</strong><small>{selectedFileName ? "Selected for upload" : "PDF, presentation, worksheet, or document · up to 16 MB"}</small></span><input type="file" name="materialFile" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" onChange={(event) => { setSelectedFileName(event.target.files?.[0]?.name ?? ""); setResourceError(""); }} /></span></label><div className="or-divider"><span>OR ADD A LINK</span></div><Field label="Resource URL"><input type="url" name="materialUrl" value={resourceUrl} onChange={(event) => { setResourceUrl(event.target.value); setResourceError(""); }} placeholder="https://…" /></Field><p className="form-hint">Add either a resource URL or an uploaded file. You can leave the other option empty.</p>{resourceError && <p className="material-form-error" role="alert">{resourceError}</p>}<p className="upload-note"><LockKeyhole size={13} /> Uploads are available to approved members. Public program materials can be viewed without signing in.</p><div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialMaterial ? "Save changes" : "Add material"}<ArrowRight size={16} /></button></div>{programs.length === 0 && <p className="form-hint">Publish a program before adding its materials.</p>}</form></div></div>;
 }
 
+function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
+  programs: Program[];
+  initialSpeaker: SpeakerProfileCard | null;
+  onClose: () => void;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+  busy: boolean;
+}) {
+  const [affiliations, setAffiliations] = useState<SpeakerAffiliation[]>(() => initialSpeaker?.affiliations?.length ? initialSpeaker.affiliations.map((item) => ({ ...item })) : [{ position: "", organization: "" }]);
+  const [topics, setTopics] = useState<string[]>(() => initialSpeaker?.topics?.length ? [...initialSpeaker.topics] : [""]);
+  const [selectedImageName, setSelectedImageName] = useState("");
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div className="form-modal speaker-editor" role="dialog" aria-modal="true" aria-label={initialSpeaker ? "Edit a speaker profile" : "Add a speaker profile"}>
+    <div className="form-modal-head"><div><span className="eyebrow">SPEAKER DIRECTORY</span><h2>{initialSpeaker ? "Edit speaker" : "Add a speaker"}<span>.</span></h2><p>Build a profile card for a published program.</p></div><button className="modal-close modal-close--inline" onClick={() => !busy && onClose()} aria-label="Close"><X size={19} /></button></div>
+    <form onSubmit={onSave}>
+      <div className="speaker-editor-grid">
+        <Field label="Program"><select name="programId" required defaultValue={initialSpeaker?.programId ?? ""}><option value="" disabled>Select a saved program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></Field>
+        <label className="field speaker-image-field"><span className="field-label">Upload an image</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedImageName || (initialSpeaker ? "Replace profile photo" : "Choose a profile photo")}</strong><small>{selectedImageName ? "Ready to upload" : "JPG, PNG, or WebP · up to 8 MB"}</small></span><input type="file" name="speakerImage" accept="image/jpeg,image/png,image/webp" onChange={(event) => setSelectedImageName(event.target.files?.[0]?.name ?? "")} /></span>{initialSpeaker && !selectedImageName && <span className="speaker-image-current"><img src={initialSpeaker.imageUrl} alt="Current speaker profile" /><span>Current image is kept unless you choose a replacement.</span></span>}</label>
+        <Field label="Name"><input name="name" defaultValue={initialSpeaker?.name ?? ""} placeholder="Speaker name" autoComplete="name" required /></Field>
+        <Field label="Designation"><input name="designation" defaultValue={initialSpeaker?.designation ?? ""} placeholder="e.g. Regional Director" required /></Field>
+        <Field label="Office"><input name="office" defaultValue={initialSpeaker?.office ?? ""} placeholder="e.g. DA-RFO XIII" required /></Field>
+      </div>
+      <input type="hidden" name="affiliationsJson" value={JSON.stringify(affiliations)} readOnly />
+      <input type="hidden" name="topicsJson" value={JSON.stringify(topics)} readOnly />
+      <section className="speaker-editor-section">
+        <div className="speaker-editor-section-head"><div><span className="eyebrow">POSITIONS & ORGANIZATIONS</span><p>Add one or more professional affiliations.</p></div><button type="button" className="text-action" onClick={() => setAffiliations((current) => [...current, { position: "", organization: "" }])}><Plus size={14} /> Add</button></div>
+        <div className="speaker-entry-list">{affiliations.map((item, index) => <div className="speaker-entry-row speaker-affiliation-row" key={index}><input aria-label={"Position " + (index + 1)} value={item.position} onChange={(event) => setAffiliations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, position: event.target.value } : row))} placeholder="Position" /><input aria-label={"Organization " + (index + 1)} value={item.organization} onChange={(event) => setAffiliations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, organization: event.target.value } : row))} placeholder="Organization" /><button type="button" className="remove-session" aria-label={"Remove position " + (index + 1)} disabled={affiliations.length === 1} onClick={() => setAffiliations((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={15} /></button></div>)}</div>
+      </section>
+      <section className="speaker-editor-section">
+        <div className="speaker-editor-section-head"><div><span className="eyebrow">TOPICS</span><p>Add the topics this speaker will cover.</p></div><button type="button" className="text-action" onClick={() => setTopics((current) => [...current, ""])}><Plus size={14} /> Add</button></div>
+        <div className="speaker-entry-list">{topics.map((topic, index) => <div className="speaker-entry-row speaker-topic-row" key={index}><input aria-label={"Topic " + (index + 1)} value={topic} onChange={(event) => setTopics((current) => current.map((value, rowIndex) => rowIndex === index ? event.target.value : value))} placeholder="e.g. Climate-smart agriculture" /><button type="button" className="remove-session" aria-label={"Remove topic " + (index + 1)} disabled={topics.length === 1} onClick={() => setTopics((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={15} /></button></div>)}</div>
+      </section>
+      <p className="upload-note"><LockKeyhole size={13} /> Speaker profiles are publicly visible. Only admins can create, edit, or remove them.</p>
+      {programs.length === 0 && <p className="form-hint">Publish a program before adding its speakers.</p>}
+      <div className="form-modal-actions"><button type="button" className="button button--soft" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" disabled={busy || programs.length === 0} className="button button--olive">{busy ? "Uploading…" : initialSpeaker ? "Save changes" : "Publish speaker"}<ArrowRight size={16} /></button></div>
+    </form>
+  </div></div>;
+}
+
 function DeleteConfirmModal({ target, busy, onClose, onConfirm }: { target: DeleteTarget; busy: boolean; onClose: () => void; onConfirm: () => void }) {
-  const title = target.kind === "mechanics" ? "contest mechanics" : target.kind;
+  const title = target.kind === "mechanics" ? "contest mechanics" : target.kind === "speaker" ? "speaker profile" : target.kind;
   const detail = target.kind === "program"
-    ? "This also removes its contest mechanics, linked materials, and contest join records."
+    ? "This also removes its contest mechanics, linked materials, speakers, and contest join records."
     : target.kind === "mechanics"
       ? "Associated member join records will also be removed."
-      : "This removes the material record from the resource library.";
+      : target.kind === "speaker" ? "This removes the profile from the speaker directory." : "This removes the material record from the resource library.";
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div className="delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-modal-title"><span className="delete-modal-icon"><Trash2 size={20} /></span><span className="eyebrow">SUPERADMIN ACTION</span><h2 id="delete-modal-title">Delete {title}?</h2><p><strong>{target.label}</strong> will be permanently deleted. {detail}</p><div className="form-modal-actions"><button type="button" className="button button--soft" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="button button--danger" disabled={busy} onClick={onConfirm}>{busy ? "Deleting…" : "Delete"}<Trash2 size={15} /></button></div></div></div>;
 }

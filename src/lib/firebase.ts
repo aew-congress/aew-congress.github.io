@@ -106,3 +106,19 @@ export type Material = {
   url: string;
   createdAt?: unknown;
 };
+
+export type SpeakerAffiliation = { position: string; organization: string };
+export type SpeakerProfileCard = {
+  id: string;
+  programId: string;
+  imageUrl: string;
+  imageKey: string;
+  name: string;
+  designation: string;
+  office: string;
+  affiliations: SpeakerAffiliation[];
+  topics: string[];
+  createdAt?: unknown;
+  createdBy?: string;
+  updatedAt?: unknown;
+};

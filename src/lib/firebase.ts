@@ -110,6 +110,7 @@ export type Material = {
 };
 
 export type SpeakerAffiliation = { position: string; organization: string };
+export type SpeakerKeynoteSession = { date: string; session: string };
 export type SpeakerProfileCard = {
   id: string;
   programId: string;
@@ -121,6 +122,7 @@ export type SpeakerProfileCard = {
   office: string;
   affiliations: SpeakerAffiliation[];
   topics: string[];
+  keynoteSessions?: SpeakerKeynoteSession[];
   createdAt?: unknown;
   createdBy?: string;
   updatedAt?: unknown;

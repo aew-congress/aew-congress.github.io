@@ -14,12 +14,13 @@ import {
   EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
-import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet"];
 const suffixes = ["Jr.", "Sr.", "II", "III", "IV", "V", "VI"];
+const keynoteSessionOptions = ["Corn Program", "HVCDP", "Livestock Program", "Organic Agriculture Program", "Rice Program", "Plenary Forum", "Legislative Forum", "Plenaries and Legislative Forum"];
 type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id: string; label: string };
 
 function displayDate(date: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }) {
@@ -924,6 +925,7 @@ export default function Experience() {
     const designation = String(form.get("designation") ?? "").trim();
     const office = String(form.get("office") ?? "").trim();
     let affiliations: SpeakerAffiliation[] = [];
+    let keynoteSessions: SpeakerKeynoteSession[] = [];
     let topics: string[] = [];
     try {
       const enteredAffiliations = (JSON.parse(String(form.get("affiliationsJson"))) as SpeakerAffiliation[]).map((item) => ({
@@ -931,11 +933,20 @@ export default function Experience() {
         organization: String(item.organization ?? "").trim(),
       }));
       const enteredTopics = (JSON.parse(String(form.get("topicsJson"))) as string[]).map((topic) => String(topic ?? "").trim());
+      const enteredKeynoteSessions = (JSON.parse(String(form.get("keynoteSessionsJson"))) as SpeakerKeynoteSession[]).map((item) => ({
+        date: String(item.date ?? "").trim(),
+        session: String(item.session ?? "").trim(),
+      }));
       if (enteredAffiliations.some((item) => Boolean(item.position) !== Boolean(item.organization))) {
         setToast({ kind: "error", text: "Complete each position with its organization." });
         return;
       }
+      if (enteredKeynoteSessions.some((item) => Boolean(item.date) !== Boolean(item.session))) {
+        setToast({ kind: "error", text: "Choose both a date and keynote session for each entry." });
+        return;
+      }
       affiliations = enteredAffiliations.filter((item) => item.position && item.organization);
+      keynoteSessions = enteredKeynoteSessions.filter((item) => item.date && item.session);
       topics = enteredTopics.filter(Boolean);
     } catch { /* Validation below reports incomplete entries. */ }
     if (!name || !designation || !office) {
@@ -963,7 +974,7 @@ export default function Experience() {
     if (!imageUrl) { setToast({ kind: "error", text: "Upload a profile image before saving this speaker." }); return; }
 
     try {
-      const payload = { programId: program.id, imageUrl, imageKey, name, postNominal, designation, office, affiliations, topics, updatedAt: serverTimestamp() };
+      const payload = { programId: program.id, imageUrl, imageKey, name, postNominal, designation, office, affiliations, keynoteSessions, topics, updatedAt: serverTimestamp() };
       if (editingSpeaker) {
         await updateDoc(doc(db, "speakers", editingSpeaker.id), payload);
       } else {
@@ -1271,18 +1282,21 @@ export default function Experience() {
   );
 }
 
-function ProgramFilterDropdown({ id, programs, value, onChange, className = "" }: {
+function ProgramFilterDropdown({ id, programs, value, onChange, className = "", label = "Program", allLabel = "All programs", choices }: {
   id: string;
   programs: Program[];
   value: string;
   onChange: (programId: string) => void;
   className?: string;
+  label?: string;
+  allLabel?: string;
+  choices?: { id: string; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [activeOption, setActiveOption] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const options = [{ id: "", label: "All programs" }, ...programs.map((program) => ({ id: program.id, label: program.eventTitle }))];
+  const options = [{ id: "", label: allLabel }, ...(choices ?? programs.map((program) => ({ id: program.id, label: program.eventTitle })))];
   const selectedIndex = Math.max(0, options.findIndex((option) => option.id === value));
 
   useEffect(() => {
@@ -1329,11 +1343,11 @@ function ProgramFilterDropdown({ id, programs, value, onChange, className = "" }
   }
 
   return <div className={`program-filter-dropdown ${className}`.trim()} ref={dropdownRef}>
-    <span id={`${id}-label`}>Program</span>
+    <span id={`${id}-label`}>{label}</span>
     <button ref={triggerRef} type="button" role="combobox" aria-autocomplete="none" className="speakers-filter-trigger" aria-labelledby={`${id}-label ${id}-value`} aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-options`} aria-activedescendant={open ? `${id}-option-${activeOption}` : undefined} onClick={() => { if (!open) setActiveOption(selectedIndex); setOpen((current) => !current); }} onKeyDown={handleKeyDown}>
-      <span id={`${id}-value`}>{options.find((option) => option.id === value)?.label ?? "All programs"}</span><ChevronDown size={16} aria-hidden="true" />
+      <span id={`${id}-value`}>{options.find((option) => option.id === value)?.label ?? allLabel}</span><ChevronDown size={16} aria-hidden="true" />
     </button>
-    {open && <div className="speakers-filter-menu" id={`${id}-options`} role="listbox" aria-label="Programs">
+    {open && <div className="speakers-filter-menu" id={`${id}-options`} role="listbox" aria-label={label}>
       {options.map((option, index) => <button className={`speakers-filter-option${index === activeOption ? " speakers-filter-option--active" : ""}`} id={`${id}-option-${index}`} key={option.id || "all-programs"} type="button" role="option" aria-selected={option.id === value} onMouseEnter={() => setActiveOption(index)} onClick={() => { onChange(option.id); setOpen(false); triggerRef.current?.focus(); }}>
         <span>{option.label}</span>{option.id === value && <Check size={16} aria-hidden="true" />}
       </button>)}
@@ -1351,17 +1365,53 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
   onDelete: (speaker: SpeakerProfileCard) => void;
 }) {
   const [programFilter, setProgramFilter] = useState("");
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  const [keynoteFilter, setKeynoteFilter] = useState("");
   const programsById = new Map(programs.map((program) => [program.id, program]));
-  const displayed = speakers.filter((speaker) => !programFilter || speaker.programId === programFilter);
+  const programSpeakers = useMemo(() => speakers.filter((speaker) => !programFilter || speaker.programId === programFilter), [programFilter, speakers]);
+  const speakerDays = useMemo(() => {
+    const dateSet = new Set<string>();
+    const matchingPrograms = programs.filter((program) => !programFilter || program.id === programFilter);
+    matchingPrograms.forEach((program) => {
+      const first = new Date(`${program.dateFrom}T12:00:00`);
+      const last = new Date(`${program.dateTo}T12:00:00`);
+      let dayCount = 0;
+      for (const day = new Date(first); day <= last && dayCount < 31; day.setDate(day.getDate() + 1), dayCount += 1) {
+        dateSet.add(day.toISOString().slice(0, 10));
+      }
+      if (!dayCount && program.dateFrom) dateSet.add(program.dateFrom);
+    });
+    programSpeakers.forEach((speaker) => (speaker.keynoteSessions ?? []).forEach((item) => {
+      if (item.date) dateSet.add(item.date);
+    }));
+    return [...dateSet].sort();
+  }, [programFilter, programSpeakers, programs]);
+  const selectedDate = selectedDayIndex >= 0 ? speakerDays[selectedDayIndex] ?? "" : "";
+  const savedKeynoteOptions = [...new Set(programSpeakers.flatMap((speaker) => (speaker.keynoteSessions ?? [])
+    .map((item) => item.session.trim())
+    .filter(Boolean)))].sort((a, b) => a.localeCompare(b));
+  const displayed = programSpeakers.filter((speaker) => {
+    const sessions = speaker.keynoteSessions ?? [];
+    const matchesDay = !selectedDate || sessions.some((item) => item.date === selectedDate);
+    const matchesKeynote = !keynoteFilter || sessions.some((item) => item.session === keynoteFilter && (!selectedDate || item.date === selectedDate));
+    return matchesDay && matchesKeynote;
+  });
+  const scheduleFilterActive = Boolean(selectedDate || keynoteFilter);
+  const visibleDayStart = Math.max(0, Math.min(Math.max(0, selectedDayIndex - 1), speakerDays.length - 3));
+  const visibleDays = speakerDays.slice(visibleDayStart, visibleDayStart + 3);
 
   return <div className="content-wrap dashboard-page speakers-page">
     <div className="section-heading speakers-heading">
       <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know the <span>Speakers</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
       <div className="speakers-controls">
-        <ProgramFilterDropdown id="speaker-program-filter" programs={programs} value={programFilter} onChange={setProgramFilter} />
+        <ProgramFilterDropdown id="speaker-program-filter" programs={programs} value={programFilter} onChange={(value) => { setProgramFilter(value); setSelectedDayIndex(0); setKeynoteFilter(""); }} />
         {isAdmin && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={16} /> Add speaker</button>}
       </div>
     </div>
+    {!isAdmin && <div className="speakers-secondary-filters">
+      <div className="speakers-day-filter"><span className="eyebrow">DAILY FILTER</span><div className="day-controls speakers-day-controls"><button className="day-arrow" aria-label="Previous speaker day" disabled={selectedDayIndex <= 0} onClick={() => setSelectedDayIndex((current) => Math.max(0, current - 1))}><ChevronLeft size={17} /></button><div className="day-tabs speakers-day-tabs">{visibleDays.map((day, index) => { const dayIndex = visibleDayStart + index; return <button key={day} className={selectedDayIndex === dayIndex ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDayIndex(dayIndex)}><span>DAY {String(dayIndex + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>; })}</div><button className="day-arrow" aria-label="Next speaker day" disabled={!speakerDays.length || selectedDayIndex >= speakerDays.length - 1} onClick={() => setSelectedDayIndex((current) => Math.min(speakerDays.length - 1, current + 1))}><ChevronRight size={17} /></button></div></div>
+      <ProgramFilterDropdown id="speaker-keynote-filter" programs={programs} value={keynoteFilter} label="Keynote Session" allLabel="All keynote sessions" choices={savedKeynoteOptions.map((session) => ({ id: session, label: session }))} className="speaker-keynote-filter" onChange={setKeynoteFilter} />
+    </div>}
     <div className="speakers-count-row"><span>{String(displayed.length).padStart(2, "0")} SPEAKERS</span><i /> <span>{programFilter ? programsById.get(programFilter)?.eventTitle : "CARAGA REGION XIII"}</span></div>
     <div className="speaker-card-grid">{displayed.map((speaker, index) => {
       const displayName = `${speaker.name.toLocaleUpperCase()}${speaker.postNominal?.trim() ? `, ${speaker.postNominal.trim()}` : ""}`;
@@ -1377,7 +1427,7 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
         </div>
       </article>;
     })}</div>
-    {!displayed.length && <div className="speakers-empty"><span><UsersRound size={22} /></span><span className="eyebrow">A PLACE FOR EVERY VOICE</span><h2>{loading ? "Gathering speaker profiles…" : programFilter ? "No speakers for this program yet" : "Meet the speakers soon."}</h2><p>{loading ? "Saved speaker profiles will appear here." : programFilter ? "Choose another program or check back when speakers are added." : "Speaker profiles shared by the admin team will appear here."}</p>{isAdmin && !loading && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={15} /> Add the first speaker</button>}</div>}
+    {!displayed.length && <div className="speakers-empty"><span><UsersRound size={22} /></span><span className="eyebrow">A PLACE FOR EVERY VOICE</span><h2>{loading ? "Gathering speaker profiles…" : scheduleFilterActive ? "No speakers match these filters." : programFilter ? "No speakers for this program yet" : "Meet the speakers soon."}</h2><p>{loading ? "Saved speaker profiles will appear here." : scheduleFilterActive ? "Choose another day or keynote session, or clear a filter to see more speakers." : programFilter ? "Choose another program or check back when speakers are added." : "Speaker profiles shared by the admin team will appear here."}</p>{isAdmin && !loading && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={15} /> Add the first speaker</button>}</div>}
   </div>;
 }
 
@@ -1788,6 +1838,7 @@ function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
   busy: boolean;
 }) {
   const [affiliations, setAffiliations] = useState<SpeakerAffiliation[]>(() => initialSpeaker?.affiliations?.length ? initialSpeaker.affiliations.map((item) => ({ ...item })) : [{ position: "", organization: "" }]);
+  const [keynoteSessions, setKeynoteSessions] = useState<SpeakerKeynoteSession[]>(() => initialSpeaker?.keynoteSessions?.length ? initialSpeaker.keynoteSessions.map((item) => ({ ...item })) : [{ date: "", session: "" }]);
   const [topics, setTopics] = useState<string[]>(() => initialSpeaker?.topics?.length ? [...initialSpeaker.topics] : [""]);
   const [selectedImageName, setSelectedImageName] = useState("");
 
@@ -1797,6 +1848,11 @@ function SpeakerModal({ programs, initialSpeaker, onClose, onSave, busy }: {
       <div className="speaker-editor-grid">
         <Field label="Program"><select name="programId" required defaultValue={initialSpeaker?.programId ?? ""}><option value="" disabled>Select a saved program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></Field>
         <label className="field speaker-image-field"><span className="field-label">Upload an image</span><span className="file-picker"><Upload size={18} /><span><strong>{selectedImageName || (initialSpeaker ? "Replace profile photo" : "Choose a profile photo")}</strong><small>{selectedImageName ? "Ready to upload" : "JPG, PNG, or WebP · up to 8 MB"}</small></span><input type="file" name="speakerImage" accept="image/jpeg,image/png,image/webp" onChange={(event) => setSelectedImageName(event.target.files?.[0]?.name ?? "")} /></span>{initialSpeaker && !selectedImageName && <span className="speaker-image-current"><img src={initialSpeaker.imageUrl} alt="Current speaker profile" /><span>Current image is kept unless you choose a replacement.</span></span>}</label>
+        <section className="speaker-editor-section speaker-keynote-section">
+          <div className="speaker-editor-section-head"><div><span className="eyebrow">KEYNOTE SESSIONS</span><p>Add the date and keynote session for this speaker.</p></div><button type="button" className="text-action" onClick={() => setKeynoteSessions((current) => [...current, { date: "", session: "" }])}><Plus size={14} /> Add</button></div>
+          <input type="hidden" name="keynoteSessionsJson" value={JSON.stringify(keynoteSessions)} readOnly />
+          <div className="speaker-entry-list">{keynoteSessions.map((item, index) => <div className="speaker-entry-row speaker-keynote-row" key={index}><label className="field"><span className="field-label">Date</span><input aria-label={`Keynote date ${index + 1}`} type="date" value={item.date} onChange={(event) => setKeynoteSessions((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, date: event.target.value } : row))} /></label><label className="field"><span className="field-label">Keynote Session</span><select aria-label={`Keynote session ${index + 1}`} value={item.session} onChange={(event) => setKeynoteSessions((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, session: event.target.value } : row))}><option value="">Select a keynote session</option>{keynoteSessionOptions.map((session) => <option key={session} value={session}>{session}</option>)}</select></label><button type="button" className="remove-session" aria-label={`Remove keynote session ${index + 1}`} disabled={keynoteSessions.length === 1} onClick={() => setKeynoteSessions((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={15} /></button></div>)}</div>
+        </section>
         <div className="speaker-name-row"><Field label="Name"><input name="name" defaultValue={initialSpeaker?.name ?? ""} placeholder="Speaker name" autoComplete="name" required /></Field><Field label="Post Nominal"><input name="postNominal" defaultValue={initialSpeaker?.postNominal ?? ""} placeholder="e.g. PhD." /></Field></div>
         <Field label="Designation"><input name="designation" defaultValue={initialSpeaker?.designation ?? ""} placeholder="e.g. Regional Director" required /></Field>
         <Field label="Office"><input name="office" defaultValue={initialSpeaker?.office ?? ""} placeholder="e.g. DA-RFO XIII" required /></Field>

@@ -2536,8 +2536,10 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
   const programFlowSessionGroups = Array.from(new Set(dailyProgramFlowMaterials.map((material) => materialSession(material) || "Other sessions"))).map((session) => ({
     session,
     materials: dailyProgramFlowMaterials.filter((material) => (materialSession(material) || "Other sessions") === session),
-  }));
-  const referenceMaterials = displayed.filter((material) => material.category === "References");
+  })).sort((first, second) => first.session.localeCompare(second.session, undefined, { sensitivity: "base" }));
+  const referenceMaterials = displayed
+    .filter((material) => material.category === "References")
+    .sort((first, second) => first.name.localeCompare(second.name, undefined, { sensitivity: "base" }));
   const colorByCategory: Record<string, string> = { Guidelines: "resource-green", Presentation: "resource-yellow", References: "resource-blue", Worksheet: "resource-orange", "Program Flow": "resource-blue", "Communication Letter": "resource-orange" };
   const isPresentationMemberView = isRegularMember && category === "Presentation";
   const isProgramFlowView = category === "Program Flow";

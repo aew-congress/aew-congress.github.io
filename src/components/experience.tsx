@@ -11,7 +11,7 @@ import {
 import {
   ArrowRight, ArrowUpRight, BadgeCheck, CalendarDays, Check,
   ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, Eye,
-  EyeOff, FileCheck2, FileText, Filter, Leaf, LockKeyhole, LogOut, Mail, MapPin,
+  EyeOff, FileCheck2, FileText, Filter, LockKeyhole, LogOut, Mail, MapPin,
   Menu, Pencil, Plus, Printer, Search, ShieldCheck, Sparkles, Trash2, Upload, UserRound, UsersRound, X,
 } from "lucide-react";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, Material, MaterialCategory, Program, ProgramSession, ResponsiblePerson, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
@@ -237,6 +237,7 @@ export default function Experience() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [contestMechanicsLoading, setContestMechanicsLoading] = useState(true);
   const [joiningContestId, setJoiningContestId] = useState("");
+  const [contestJoinConfirm, setContestJoinConfirm] = useState<ContestMechanics | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [cloudIssue, setCloudIssue] = useState("");
   const [loading, setLoading] = useState(true);
@@ -255,6 +256,11 @@ export default function Experience() {
     const programYear = Number(currentYearProgram?.dateFrom?.slice(0, 4));
     document.title = `AEW Congress ${programYear || currentYear}`;
   }, [currentYear, currentYearProgram]);
+  useEffect(() => {
+    if (window.location.hash === "#top") {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+    }
+  }, []);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const attendanceConfirmationId = user && selectedProgram ? `${selectedProgram.id}_${user.uid}` : "";
   const attendanceChecking = isRegularMember && (!attendanceConfirmationId || attendanceStatus.id !== attendanceConfirmationId || attendanceStatus.loading);
@@ -957,6 +963,12 @@ export default function Experience() {
     } finally { setJoiningContestId(""); }
   }
 
+  async function confirmContestJoin() {
+    if (!contestJoinConfirm) return;
+    await joinContest(contestJoinConfirm);
+    setContestJoinConfirm(null);
+  }
+
   async function confirmContestant(join: ContestJoin) {
     if (!isAdmin || join.status === "Qualified Contestant") return;
     setConfirmingJoinId(join.id);
@@ -1028,16 +1040,24 @@ export default function Experience() {
     ...(isApprovedMember ? [{ id: "programs" as Section, label: "Programs" }] : []),
     ...(isApprovedMember ? [{ id: "contests" as Section, label: "Contest" }] : []),
     ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Mechanics" }] : []),
-    ...(signedIn ? [{ id: "materials" as Section, label: "Materials" }] : []),
+    ...(signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
     ...(isAdmin ? [{ id: "manage" as Section, label: "Manage content" }] : []),
     ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
     ...(isAdmin ? [{ id: "approval" as Section, label: "User approval" }] : []),
   ];
 
   return (
-    <div className="site-shell">
+    <div
+      className="site-shell"
+      onDragStartCapture={(event) => {
+        if (event.target instanceof HTMLImageElement) event.preventDefault();
+      }}
+      onContextMenuCapture={(event) => {
+        if (event.target instanceof HTMLImageElement) event.preventDefault();
+      }}
+    >
       <header className="topbar">
-        <a href="#top" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); setSection("home"); }}>
+        <a href="/" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search); setSection("home"); }}>
           <span className="brand-mark"><img src="/AEW_logo_1.png" alt="" /></span>
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
         </a>
@@ -1060,7 +1080,7 @@ export default function Experience() {
         ) : section === "contestMechanics" && isAdmin ? (
           <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
         ) : section === "contests" && isApprovedMember ? (
-          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={joinContest} />
+          <ContestsPage contests={contestMechanics} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
@@ -1108,9 +1128,9 @@ export default function Experience() {
         )}
       </main>
 
-      {section !== "home" && <footer className="footer content-wrap"><span className="footer-copy">© {new Date().getFullYear()} AEW Congress <i>·</i> For extension workers, by extension workers.</span><a href="#top" className="back-top">BACK TO TOP <ArrowUpRight size={14} /></a></footer>}
 
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
+      {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
       {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
@@ -1128,6 +1148,7 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
     : loading ? "Loading this year’s program…" : "Dates to be announced";
   const eventVenue = program?.venue || (loading ? "Loading venue…" : "Venue to be announced");
   const eventTheme = program?.theme || (loading ? "Loading this year’s theme…" : "Theme to be announced");
+  const eventDescription = program?.description?.trim() || (loading ? "Loading the program description…" : "Program description to be announced.");
   const objectives = [
     { icon: BadgeCheck, title: "Honoring & Acknowledging Frontliners", description: "Recognize the people connecting institutions, programs, and local communities." },
     { icon: Sparkles, title: "Capacity Building & Knowledge Updates", description: "Bring current research, practices, and useful tools into extension work." },
@@ -1140,8 +1161,8 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
       <div className="content-wrap landing-hero-inner">
         <div className="landing-hero-copy">
           <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · {eventTitle.toUpperCase()}</span>
-          <h1>Recognizing the people who help agriculture <span>thrive.</span></h1>
-          <p><strong>Agricultural Extension Worker (AEW) Congress</strong> recognizes, empowers, and supports agricultural and fishery extension workers—the vital frontliners connecting research institutions and government agencies with local farming and fishing communities.</p>
+          <h1 className="landing-hero-theme">{eventTheme}</h1>
+          <p>{eventDescription}</p>
           <div className="landing-hero-actions">
             <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
             <button className="text-action" onClick={onMemberAccess}>Member access <ArrowRight size={16} /></button>
@@ -1156,7 +1177,6 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onMembe
           <span className="landing-photo-badge"><strong>AEW CONGRESS</strong><small>CARAGA REGION XIII</small></span>
           <figcaption><span>RECOGNIZE · EMPOWER · SUPPORT</span><strong>Frontliners bridging knowledge and community</strong></figcaption>
         </figure>
-        <div className="landing-theme-banner"><span className="landing-theme-icon"><Sparkles size={18} /></span><span className="landing-theme-copy"><small>CURRENT YEAR · {currentYear} THEME</small><strong>{eventTheme}</strong></span><span className="landing-theme-year">{currentYear}</span></div>
       </div>
     </section>
 
@@ -1195,6 +1215,27 @@ function AttendanceConfirmationModal({ programTitle, busy, onCancel, onConfirm }
   </div>;
 }
 
+function ContestJoinConfirmationModal({ contestName, eventTitle, busy, onCancel, onConfirm }: {
+  contestName: string;
+  eventTitle: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return <div className="modal-backdrop attendance-confirm-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }} onKeyDown={(event) => { if (event.key === "Escape" && !busy) onCancel(); }}>
+    <section className="attendance-confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="contest-join-confirm-title">
+      <div className="attendance-confirm-icon"><UsersRound size={21} /></div>
+      <span className="eyebrow">CONTEST REGISTRATION</span>
+      <h2 id="contest-join-confirm-title">Are you sure you want to join this contest?</h2>
+      <p><strong>{contestName}</strong><br />{eventTitle}</p>
+      <div className="attendance-confirm-actions">
+        <button className="button button--soft" type="button" autoFocus disabled={busy} onClick={onCancel}>No</button>
+        <button className="button button--olive" type="button" disabled={busy} onClick={onConfirm}>{busy ? "Joining…" : "Yes"}</button>
+      </div>
+    </section>
+  </div>;
+}
+
 function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
   mode: "login" | "create" | "reset"; setMode: (value: "login" | "create" | "reset") => void; onClose: () => void;
   onLogin: (event: FormEvent<HTMLFormElement>) => void; onCreate: (event: FormEvent<HTMLFormElement>) => void; onForgot: (email: string) => void;
@@ -1205,38 +1246,80 @@ function AuthModal({ mode, setMode, onClose, onLogin, onCreate, onForgot }: {
   const [confirmation, setConfirmation] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [privacyConsentOpen, setPrivacyConsentOpen] = useState(false);
+  const createFormRef = useRef<HTMLFormElement>(null);
+  const consentApproved = useRef(false);
   const today = new Date().toISOString().slice(0, 10);
+  function handleCreateSubmit(event: FormEvent<HTMLFormElement>) {
+    if (!consentApproved.current) {
+      event.preventDefault();
+      setPrivacyConsentOpen(true);
+      return;
+    }
+    consentApproved.current = false;
+    onCreate(event);
+  }
+  function confirmPrivacyConsent() {
+    consentApproved.current = true;
+    setPrivacyConsentOpen(false);
+    window.requestAnimationFrame(() => createFormRef.current?.requestSubmit());
+  }
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="auth-modal" role="dialog" aria-modal="true" aria-label={mode === "create" ? "Create an account" : mode === "reset" ? "Reset your password" : "Log in"}>
       <button className="modal-close" onClick={onClose} aria-label="Close"><X size={19} /></button>
       <div className="auth-side auth-side--form">
         <div className="auth-mobile-brand"><img src="/AEW_logo_1.png" alt="AEW" /><span>AEW <strong>CONGRESS</strong></span></div>
-        <div className="auth-heading"><span className="eyebrow">{mode === "create" ? "JOIN THE COMMUNITY" : mode === "reset" ? "ACCOUNT RECOVERY" : "WELCOME BACK"}</span><h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : mode === "reset" ? <>Reset your<br />password<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : mode === "reset" ? "We’ll send a secure reset link to the email on your account." : "Sign in to access your programs and shared materials."}</p></div>
+        <div className="auth-heading">{mode !== "create" && <span className="eyebrow">{mode === "reset" ? "ACCOUNT RECOVERY" : "WELCOME BACK"}</span>}<h2>{mode === "create" ? <>Create your<br />account<span>.</span></> : mode === "reset" ? <>Reset your<br />password<span>.</span></> : <>Your next chapter<br />starts here<span>.</span></>}</h2><p>{mode === "create" ? "Register once your office is ready to join the learning exchange." : mode === "reset" ? "We’ll send a secure reset link to the email on your account." : "Sign in to access your programs and shared materials."}</p></div>
         {mode === "login" ? <form className="auth-form login-form" onSubmit={onLogin}>
-          <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
+          <Field label="Email address" icon={<UserRound size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Your email here" required /></Field>
           <Field label="Password" icon={<LockKeyhole size={15} />}><input type={showPassword ? "text" : "password"} name="password" autoComplete="current-password" placeholder="Enter your password" required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></Field>
           <div className="auth-form-row"><span className="secure-note"><ShieldCheck size={13} /> Protected access</span><button type="button" className="forgot-link" onClick={() => setMode("reset")}>Forgot password?</button></div>
           <button className="button button--olive button--wide" type="submit">Log in <ArrowRight size={16} /></button>
           <p className="auth-switch">New to AEW Congress? <button type="button" onClick={() => setMode("create")}>Create an account</button></p>
         </form> : mode === "reset" ? <form className="auth-form login-form reset-form" onSubmit={(event) => { event.preventDefault(); onForgot(email); }}>
-          <Field label="Email address" icon={<Mail size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@office.gov.ph" required /></Field>
+          <Field label="Email address" icon={<Mail size={15} />}><input type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Your email here" required /></Field>
           <div className="reset-note"><LockKeyhole size={15} /><span>For your privacy, we’ll show the same confirmation whether or not an account exists.</span></div>
           <button className="button button--olive button--wide" type="submit">Send reset link <ArrowRight size={16} /></button>
           <p className="auth-switch">Remembered your password? <button type="button" onClick={() => setMode("login")}>Back to log in</button></p>
-        </form> : <form className="auth-form create-form" onSubmit={onCreate}>
+        </form> : <form ref={createFormRef} className="auth-form create-form" onSubmit={handleCreateSubmit}>
           <div className="form-section-label">PERSONAL DETAILS <span>01 / 02</span></div>
           <div className="form-grid form-grid--four"><Field label="First name"><input name="firstName" autoComplete="given-name" placeholder="First name" required /></Field><Field label="Middle name"><input name="middleName" autoComplete="additional-name" placeholder="Middle name" /></Field><Field label="Last name"><input name="lastName" autoComplete="family-name" placeholder="Last name" required /></Field><Field label="Suffix"><select name="suffix"><option value="">—</option>{suffixes.map((suffix) => <option key={suffix}>{suffix}</option>)}</select></Field></div>
           <div className="form-grid form-grid--three"><Field label="Birthdate"><input type="date" name="birthdate" max={today} required /></Field><Field label="Sex at birth"><select name="sexAtBirth" required defaultValue=""><option value="" disabled>Select</option><option>Male</option><option>Female</option></select></Field><Field label="Contact number"><div className="phone-input"><span>+63 9</span><input name="phone" inputMode="numeric" autoComplete="tel-national" value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 9))} placeholder="XX XXX XXXX" maxLength={9} required /></div></Field></div>
           <div className="form-section-label form-section-label--spaced">WORK DETAILS <span>02 / 02</span></div>
           <div className="form-grid form-grid--three"><Field label="Position"><input name="position" placeholder="e.g. Agriculturist II" required /></Field><Field label="Designation"><input name="designation" placeholder="e.g. Municipal AEW" required /></Field><Field label="Office"><input name="office" placeholder="Office or organization" required /></Field></div>
-          <div className="form-grid form-grid--three"><Field label="Email address"><input type="email" name="email" autoComplete="email" placeholder="you@office.gov.ph" required /></Field><Field label="Password"><div className="password-field"><input type={showPassword ? "text" : "password"} name="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field><Field label="Confirm password"><div className="password-field"><input type={showConfirmation ? "text" : "password"} name="confirmation" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Re-enter password" required /><button className="password-toggle" type="button" onClick={() => setShowConfirmation((value) => !value)} aria-label={showConfirmation ? "Hide password" : "Show password"}>{showConfirmation ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field></div>
-          <p className="privacy-note"><LockKeyhole size={13} /> Registration details are visible only to authorized administrators.</p>
+          <div className="form-grid form-grid--three"><Field label="Email address"><input type="email" name="email" autoComplete="email" placeholder="Your email here" required /></Field><Field label="Password"><div className="password-field"><input type={showPassword ? "text" : "password"} name="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required /><button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field><Field label="Confirm password"><div className="password-field"><input type={showConfirmation ? "text" : "password"} name="confirmation" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Re-enter password" required /><button className="password-toggle" type="button" onClick={() => setShowConfirmation((value) => !value)} aria-label={showConfirmation ? "Hide password" : "Show password"}>{showConfirmation ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field></div>
           <button className="button button--olive button--wide" type="submit">Submit for approval <ArrowRight size={16} /></button>
           <p className="auth-switch">Already registered? <button type="button" onClick={() => setMode("login")}>Log in</button></p>
         </form>}
       </div>
-      <aside className="auth-side auth-side--art"><div className="auth-art-top"><span>AEW</span><span>CONGRESS<br />REGION XIII</span></div><div className="auth-orbit"><div className="orbit-circle orbit-circle--one" /><div className="orbit-circle orbit-circle--two" /><div className="orbit-circle orbit-circle--three" /><span className="orbit-seed orbit-seed--one" /><span className="orbit-seed orbit-seed--two" /><div className="orbit-core"><img src="/AEW_logo.png" alt="AEW Congress" /></div></div><div className="auth-quote"><span>“</span><p>Better knowledge.<br /><i>Stronger communities.</i></p><small>AGRICULTURAL EXTENSION WORKERS · CARAGA</small></div><div className="auth-side-foot"><span>LEARN · SHARE · GROW</span></div></aside>
+      <aside className="auth-side auth-side--art" aria-label="Illustrated farmers working in an agricultural landscape"><img src="/right.png" alt="" /></aside>
+      {privacyConsentOpen && <DataPrivacyConsentModal onCancel={() => setPrivacyConsentOpen(false)} onConfirm={confirmPrivacyConsent} />}
     </div>
+  </div>;
+}
+
+function DataPrivacyConsentModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  return <div className="auth-policy-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <section className="form-modal auth-policy-modal" role="alertdialog" aria-modal="true" aria-labelledby="privacy-consent-title" aria-describedby="privacy-consent-copy">
+      <div className="form-modal-head"><div><span className="eyebrow">REGISTRATION CONSENT</span><h2 id="privacy-consent-title">Data Privacy Consent &amp; Terms of Service</h2></div></div>
+      <div className="auth-policy-copy" id="privacy-consent-copy">
+        <p>By confirming this and submitting this registration, I certify that the information provided is accurate and complete.</p>
+        <p>In compliance with the Data Privacy Act of 2012 (R.A. 10173), I freely and explicitly give my consent to DA-RFO XIII to collect, process, store, and verify my personal and sensitive personal information solely for the purposes of account creation, identity verification, and administrative approval.</p>
+        <p>I acknowledge that I have read and agree to the Privacy Policy.</p>
+      </div>
+      <div className="form-modal-actions auth-policy-actions">
+        <button type="button" className="button button--soft" autoFocus onClick={onCancel}>Cancel</button>
+        <button type="button" className="button button--olive" onClick={onConfirm}>Agree and submit</button>
+      </div>
+    </section>
   </div>;
 }
 
@@ -1406,7 +1489,7 @@ function MaterialsPage({ materials, programs, isAdmin, onAdd, onDownload, loadin
     <div className="resource-categories"><button className={category === "All resources" ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory("All resources")}>All resources <span>{materials.length}</span></button>{categories.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory(item)}>{item}<span>{materials.filter((m) => m.category === item).length}</span></button>)}</div>
     <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />Available to all members</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
-    </div><div className="materials-footnote"><Leaf size={16} /><span>Know something useful? Share it with the team and help good ideas travel.</span></div>
+    </div>
   </div>;
 }
 

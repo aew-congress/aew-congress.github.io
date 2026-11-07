@@ -959,3 +959,22 @@ img { -webkit-user-drag: none; user-select: none; }
   .program-editor--fullscreen .responsible-edit-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; }
   .program-editor--fullscreen .session-edit-topic-fields { padding: 8px; }
 }
+
+/* Show the event poster as a responsive, full-width banner above the landing copy. */
+.landing-hero-banner { width: 100%; margin: 0; padding: clamp(18px, 3vw, 42px) clamp(18px, 6vw, 120px) 0; overflow: hidden; }
+.landing-hero-banner img { display: block; width: 100%; height: auto; border: 1px solid #e7eadf; border-radius: clamp(12px, 1.4vw, 20px); box-shadow: 0 16px 36px #26341516; object-fit: contain; }
+.landing-hero-inner { display: block; padding-block: clamp(8px, 1vw, 16px) 20px; }
+.landing-hero-copy { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); align-items: center; column-gap: clamp(28px, 5vw, 72px); row-gap: 8px; max-width: 1200px; }
+.landing-hero-copy > h1 { grid-column: 1; grid-row: 1; margin-top: 10px; margin-bottom: 12px; }
+.landing-hero-details { grid-column: 2; grid-row: 1; min-width: 0; }
+.landing-hero-details > p { max-width: 620px; margin: 0; color: #727a6d; font-size: 15px; line-height: 1.8; }
+.landing-hero-details .landing-hero-actions { margin-top: 16px; }
+.landing-hero-details .landing-event-facts { margin-top: 18px; padding-top: 14px; }
+@media (max-width: 1050px) {
+  .landing-hero-copy { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 32px; }
+}
+@media (max-width: 760px) {
+  .landing-hero-copy { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  .landing-hero-copy > h1, .landing-hero-details { grid-column: 1; grid-row: auto; }
+  .landing-hero-details { margin-top: 18px; }
+}

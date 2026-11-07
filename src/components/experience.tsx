@@ -1709,25 +1709,24 @@ function HomeLanding({ program, currentYear, loading, onExplorePrograms, onKnowS
 
   return <div className="landing-page">
     <section className="landing-hero">
+      <figure className="landing-hero-banner">
+        <img src="/p1.jpg" alt="Agricultural Extension Workers Congress 2026 event poster" />
+      </figure>
       <div className="content-wrap landing-hero-inner">
         <div className="landing-hero-copy">
-          <span className="eyebrow"><span className="eyebrow-dot" />DA-RFO XIII · {eventTitle.toUpperCase()}</span>
           <h1 className="landing-hero-theme">{eventTheme}</h1>
-          <p>{eventDescription}</p>
-          <div className="landing-hero-actions">
-            <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
-            <button className="text-action" onClick={onKnowSpeakers}>Know the Speakers <ArrowRight size={16} /></button>
-          </div>
-          <div className="landing-event-facts">
-            <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>{eventDates}</strong></span></div>
-            <div className="landing-event-fact"><span className="landing-fact-icon"><MapPin size={18} /></span><span><small>VENUE</small><strong>{eventVenue}</strong></span></div>
+          <div className="landing-hero-details">
+            <p>{eventDescription}</p>
+            <div className="landing-hero-actions">
+              <button className="button button--olive" onClick={onExplorePrograms}>Explore the program <ArrowRight size={16} /></button>
+              <button className="text-action" onClick={onKnowSpeakers}>Know the Speakers <ArrowRight size={16} /></button>
+            </div>
+            <div className="landing-event-facts">
+              <div className="landing-event-fact"><span className="landing-fact-icon"><CalendarDays size={18} /></span><span><small>CONGRESS DATES</small><strong>{eventDates}</strong></span></div>
+              <div className="landing-event-fact"><span className="landing-fact-icon"><MapPin size={18} /></span><span><small>VENUE</small><strong>{eventVenue}</strong></span></div>
+            </div>
           </div>
         </div>
-        <figure className="landing-hero-photo">
-          <img src="/p1.jpg" alt="An agricultural extension worker speaking at a congress" />
-          <span className="landing-photo-badge"><strong>AEW CONGRESS</strong><small>CARAGA REGION XIII</small></span>
-          <figcaption><span>RECOGNIZE · EMPOWER · SUPPORT</span><strong>Frontliners bridging knowledge and community</strong></figcaption>
-        </figure>
       </div>
     </section>
 

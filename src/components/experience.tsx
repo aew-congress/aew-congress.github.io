@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { BrowserQRCodeReader, type IScannerControls } from "@zxing/browser";
 import sanitizeHtml from "sanitize-html";
-import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramKeynoteTopic, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
+import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, Material, MaterialCategory, MaterialFile, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
@@ -75,6 +75,30 @@ function dateOptionsBetween(from: string, to: string) {
     dates.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
   }
   return dates;
+}
+
+function programTopicEntries(program: Program) {
+  return [
+    ...(program.flow ?? []).flatMap((session) => (session.topics ?? []).map((topic) => ({ date: session.date, topic: topic.trim() })).filter((item) => item.topic)),
+    ...(program.keynoteTopics ?? []).map((item) => ({ date: item.date, topic: item.topic.trim() })).filter((item) => item.topic),
+  ];
+}
+
+function programHasTopicOnDate(program: Program | undefined, date: string, topic: string) {
+  if (!program) return false;
+  const normalizedTopic = topic.trim();
+  return programTopicEntries(program).some((item) => item.date === date && item.topic === normalizedTopic);
+}
+
+function programHasSessionOnDate(program: Program | undefined, date: string, session: string) {
+  if (!program) return false;
+  const normalizedSession = session.trim();
+  return (program.flow ?? []).some((item) => item.date === date && item.session.trim() === normalizedSession)
+    || (program.keynoteTopics ?? []).some((item) => item.date === date && item.session.trim() === normalizedSession);
+}
+
+function materialSession(material: Material) {
+  return material.session?.trim() || material.keynoteSession?.trim() || "";
 }
 
 function fullName(person: Partial<UserProfile>) {
@@ -198,14 +222,6 @@ function responsibleSearchText(value: ProgramSession["responsible"]) {
   return responsiblePeople(value).map((person) => `${person.name} ${person.designation} ${person.office}`).join(" ");
 }
 
-function sessionTableRowCount(item: ProgramSession) {
-  const topics = (item.topics ?? []).filter(Boolean);
-  if (!topics.length) return 1;
-  if (item.allParticipants || item.responsibleNotApplicable) return topics.length + 1;
-  const peopleCount = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office).length;
-  return 1 + Math.max(topics.length, peopleCount);
-}
-
 function saveDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -256,14 +272,6 @@ function isUploadThingFile(value: string) {
     const uploadThingHost = ["ufs.sh", "utfs.io"].some((domain) => host === domain || host.endsWith(`.${domain}`));
     return url.protocol === "https:" && uploadThingHost && url.pathname.startsWith("/f/");
   } catch { return false; }
-}
-
-function SessionResponsibleDisplay({ item }: { item: ProgramSession }) {
-  if (item.responsibleNotApplicable) return null;
-  if (item.allParticipants) return <span className="all-participants-value">All Participants</span>;
-  const people = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office);
-  if (!people.length) return null;
-  return <div className="session-person-list">{people.map((person, personIndex) => <span key={`${person.name}-${personIndex}`}><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>)}</div>;
 }
 
 function errorText(error: unknown) {
@@ -466,7 +474,7 @@ export default function Experience() {
           groupEnd += 1;
         }
       }
-      const groupedRowSpan = filteredSessions.slice(index, groupEnd).reduce((count, session) => count + sessionTableRowCount(session), 0);
+      const groupedRowSpan = groupEnd - index;
       rows.push({ item, timeRowSpan: groupedRowSpan, timeGroup, period, periodLabel });
       for (let groupedIndex = index + 1; groupedIndex < groupEnd; groupedIndex += 1) {
         rows.push({ item: filteredSessions[groupedIndex], timeRowSpan: 0, timeGroup, period, periodLabel: "" });
@@ -974,20 +982,12 @@ export default function Experience() {
       return;
     }
     const form = new FormData(event.currentTarget);
-    const flow = (JSON.parse(String(form.get("flowJson"))) as ProgramSession[]).map(normalizeProgramSession);
-    const enteredKeynoteTopics = (JSON.parse(String(form.get("keynoteTopicsJson"))) as ProgramKeynoteTopic[]).map((item) => ({
-      date: String(item.date ?? "").trim(),
-      session: String(item.session ?? "").trim(),
-      topic: String(item.topic ?? "").trim(),
-    }));
-    const partialKeynoteTopic = enteredKeynoteTopics.some((item) => {
-      const hasAnyValue = Boolean(item.date || item.session || item.topic);
-      return hasAnyValue && (!item.date || !item.session || !item.topic);
-    });
-    if (partialKeynoteTopic) {
-      setToast({ kind: "error", text: "Complete the date, keynote session, and topic for each keynote row." });
+    const enteredFlow = JSON.parse(String(form.get("flowJson"))) as ProgramSession[];
+    if (enteredFlow.some((session) => session.topics?.some((topic) => !String(topic).trim()))) {
+      setToast({ kind: "error", text: "Complete or remove each topic before saving the program." });
       return;
     }
+    const flow = enteredFlow.map(normalizeProgramSession);
     const payload = {
       eventTitle: String(form.get("eventTitle")).trim(),
       theme: String(form.get("theme") ?? "").trim(),
@@ -995,15 +995,10 @@ export default function Experience() {
       dateTo: String(form.get("dateTo")),
       venue: String(form.get("venue")).trim(),
       description: String(form.get("description")).trim(),
-      keynoteTopics: enteredKeynoteTopics.filter((item) => item.date && item.session && item.topic),
       flow,
       createdAt: serverTimestamp(),
     };
     if (payload.dateTo < payload.dateFrom) { setToast({ kind: "error", text: "The end date must be on or after the start date." }); return; }
-    if (payload.keynoteTopics.some((item) => item.date < payload.dateFrom || item.date > payload.dateTo || !keynoteSessionOptions.includes(item.session))) {
-      setToast({ kind: "error", text: "Choose a keynote date within the event range and a listed keynote session." });
-      return;
-    }
     try {
       const adminUser = await getVerifiedAdmin();
       if (editingProgram) {
@@ -1058,9 +1053,11 @@ export default function Experience() {
     const externalUrl = String(form.get("materialUrl")).trim();
     const category = String(form.get("category")) as MaterialCategory;
     const topic = category === "Presentation" ? String(form.get("topic") ?? "").trim() : "";
-    const keynoteSession = category === "Program Flow" ? String(form.get("keynoteSession") ?? "").trim() : "";
-    if (category === "Program Flow" && !targetProgram.keynoteTopics?.some((item) => item.session.trim() === keynoteSession)) {
-      setToast({ kind: "error", text: "Choose a saved keynote session for this program flow material." });
+    const session = category === "Program Flow" ? String(form.get("session") ?? "").trim() : "";
+    const savedFlowSessions = (targetProgram.flow ?? []).map((item) => item.session.trim()).filter(Boolean);
+    const isUnchangedLegacySession = editingMaterial?.programId === targetProgram.id && materialSession(editingMaterial) === session;
+    if (category === "Program Flow" && !savedFlowSessions.includes(session) && !isUnchangedLegacySession) {
+      setToast({ kind: "error", text: "Choose a session saved in this program's daily flow." });
       return;
     }
     let uploadedFiles: MaterialFile[] = [];
@@ -1095,7 +1092,7 @@ export default function Experience() {
         programTitle: targetProgram.eventTitle,
         category,
         topic,
-        keynoteSession,
+        session,
         images,
         files: attachments,
         name: name || url.split("/").pop() || "Program resource",
@@ -1488,8 +1485,7 @@ export default function Experience() {
                   const periodExpanded = !period || expandedSessionPeriods.has(periodKey);
                   const topics = (item.topics ?? []).filter(Boolean);
                   const people = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office);
-                  const topicRowCount = Math.max(topics.length, item.allParticipants || item.responsibleNotApplicable ? 0 : people.length);
-                  const topicRows = topics.length ? Array.from({ length: topicRowCount }, (_, topicIndex) => ({ topic: topics[topicIndex] ?? "", person: people[topicIndex] })) : [];
+                  const detailRowCount = Math.max(topics.length, item.allParticipants || item.responsibleNotApplicable ? 1 : people.length, 1);
                   const sessionRowClass = `session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`;
                   const setHoveredGroup = (hovered: boolean) => setHoveredTimeGroup((current) => hovered ? timeGroup : current === timeGroup ? null : current);
                   return <Fragment key={`${item.date}-${item.startTime ?? item.time}-${item.session}-${index}`}>
@@ -1499,19 +1495,20 @@ export default function Experience() {
                       else next.add(periodKey);
                       return next;
                     })}><ChevronRight size={14} />{periodLabel}</button></th></tr>}
-                    {periodExpanded && topicRows.length > 0 ? <>
-                      <tr className={`${sessionRowClass} session-topic-title-row`} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)} style={{ animationDelay: `${index * 45}ms` }}>
-                        {timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}
-                        <td className="session-name" colSpan={2}><div className="session-title">{item.session}</div></td>
-                      </tr>
-                      {topicRows.map(({ topic, person }, topicIndex) => <tr className={`${sessionRowClass} session-topic-row`} key={`${topic}-${topicIndex}`} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)}>
-                        <td className="session-topic-cell">{topic && <ul className="session-topic-row-list" aria-label="Topic"><li>{topic}</li></ul>}</td>
-                        <td className="session-person">{item.allParticipants ? <span className="all-participants-value">All Participants</span> : !item.responsibleNotApplicable && person && <div className="session-person-list"><span><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span></div>}</td>
-                      </tr>)}
-                    </> : periodExpanded && <tr className={sessionRowClass} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)} style={{ animationDelay: `${index * 45}ms` }}>
+                    {periodExpanded && <tr className={sessionRowClass} onMouseEnter={() => setHoveredGroup(true)} onMouseLeave={() => setHoveredGroup(false)} style={{ animationDelay: `${index * 45}ms` }}>
                       {timeRowSpan > 0 && <td className="session-time" rowSpan={timeRowSpan}>{sessionTimeLabel(item)}</td>}
-                      <td className="session-name"><div className="session-title">{item.session}</div></td>
-                      <td className="session-person"><SessionResponsibleDisplay item={item} /></td>
+                      <td className="session-details-cell" colSpan={2}><table className="session-details-table" aria-label={`${item.session} topics and responsible people`}><tbody>
+                        <tr className="session-details-title"><th colSpan={2} scope="row"><div className="session-title">{item.session}</div></th></tr>
+                        {Array.from({ length: detailRowCount }, (_, detailIndex) => {
+                          const person = people[detailIndex];
+                          return <tr className="session-details-pair" key={detailIndex}>
+                            <td className="session-details-topic">{topics[detailIndex] && <span><i aria-hidden="true">•</i>{topics[detailIndex]}</span>}</td>
+                            {item.allParticipants
+                              ? <td className="session-details-responsible session-details-responsible--all"><span className="all-participants-value">All Participants</span></td>
+                              : <td className="session-details-responsible">{!item.responsibleNotApplicable && person && <span><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>}</td>}
+                          </tr>;
+                        })}
+                      </tbody></table></td>
                     </tr>}
                   </Fragment>;
                 })}
@@ -1532,7 +1529,7 @@ export default function Experience() {
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
-      {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} programs={programs} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
+      {programModal && <ProgramModal key={editingProgram?.id ?? "new-program"} initialProgram={editingProgram} onClose={() => { setProgramModal(false); setEditingProgram(null); }} onCreate={createProgram} />}
       {contestMechanicsModal && <ContestMechanicsModal key={editingMechanics?.id ?? "new-mechanics"} programs={programs} initialMechanics={editingMechanics} onClose={() => { setContestMechanicsModal(false); setEditingMechanics(null); }} onCreate={createContestMechanics} />}
       {materialModal && <MaterialModal key={editingMaterial?.id ?? "new-material"} programs={programs} initialMaterial={editingMaterial} onClose={() => { setMaterialModal(false); setEditingMaterial(null); }} onCreate={createMaterial} busy={uploadBusy} />}
       {speakerModal && <SpeakerModal key={editingSpeaker?.id ?? "new-speaker"} programs={programs} initialSpeaker={editingSpeaker} onClose={() => { setSpeakerModal(false); setEditingSpeaker(null); }} onSave={createSpeaker} busy={uploadBusy} />}
@@ -2505,28 +2502,28 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
   const displayed = availableMaterials.filter((material) =>
     material.category === category
     && (program === "All programs" || material.programId === program)
-    && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""} ${material.keynoteSession ?? ""}`.toLowerCase().includes(queryText.toLowerCase()))
+    && (!queryText || `${material.name} ${material.programTitle} ${material.topic ?? ""} ${materialSession(material)}`.toLowerCase().includes(queryText.toLowerCase()))
   );
   const presentationMaterials = displayed.filter((material) => material.category === "Presentation");
   const dailyPresentationMaterials = isRegularMember && category === "Presentation" && selectedDailyDate
-    ? presentationMaterials.filter((material) => programs.find((item) => item.id === material.programId)?.keynoteTopics?.some((item) => item.date === selectedDailyDate && item.topic.trim() === material.topic?.trim()) ?? false)
+    ? presentationMaterials.filter((material) => programHasTopicOnDate(programs.find((item) => item.id === material.programId), selectedDailyDate, material.topic ?? ""))
     : presentationMaterials;
   const presentationTopicGroups = Array.from(new Set(dailyPresentationMaterials.map((material) => material.topic?.trim() || "Other presentations"))).map((topic) => ({
     topic,
     materials: dailyPresentationMaterials.filter((material) => (material.topic?.trim() || "Other presentations") === topic),
   }));
   const programFlowMaterials = displayed.filter((material) => material.category === "Program Flow");
-  const dailyProgramFlowMaterials = isRegularMember && category === "Program Flow" && selectedDailyDate
-    ? programFlowMaterials.filter((material) => programs.find((item) => item.id === material.programId)?.keynoteTopics?.some((item) => item.date === selectedDailyDate && item.session.trim() === material.keynoteSession?.trim()) ?? false)
+  const dailyProgramFlowMaterials = category === "Program Flow" && selectedDailyDate
+    ? programFlowMaterials.filter((material) => programHasSessionOnDate(programs.find((item) => item.id === material.programId), selectedDailyDate, materialSession(material)))
     : programFlowMaterials;
-  const programFlowSessionGroups = Array.from(new Set(dailyProgramFlowMaterials.map((material) => material.keynoteSession?.trim() || "Other sessions"))).map((session) => ({
+  const programFlowSessionGroups = Array.from(new Set(dailyProgramFlowMaterials.map((material) => materialSession(material) || "Other sessions"))).map((session) => ({
     session,
-    materials: dailyProgramFlowMaterials.filter((material) => (material.keynoteSession?.trim() || "Other sessions") === session),
+    materials: dailyProgramFlowMaterials.filter((material) => (materialSession(material) || "Other sessions") === session),
   }));
   const colorByCategory: Record<string, string> = { Guidelines: "resource-green", Presentation: "resource-yellow", References: "resource-blue", Worksheet: "resource-orange", "Program Flow": "resource-blue", "Communication Letter": "resource-orange" };
   const isPresentationMemberView = isRegularMember && category === "Presentation";
-  const isProgramFlowMemberView = isRegularMember && category === "Program Flow";
-  const isDailyFilteredMemberView = isPresentationMemberView || isProgramFlowMemberView;
+  const isProgramFlowView = category === "Program Flow";
+  const isDailyFilteredView = isPresentationMemberView || isProgramFlowView;
 
   return <div className="content-wrap materials-page">
 
@@ -2536,7 +2533,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
       {isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add material</button>}
     </div>
     <div className="resource-categories">{resourceCategoryOrder.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => { setCategory(item); if (item === "Presentation" || item === "Program Flow") setDailyIndex(0); }}>{item}<span>{availableMaterials.filter((material) => material.category === item).length}</span></button>)}</div>
-    {isDailyFilteredMemberView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
+    {isDailyFilteredView && <div className="presentation-daily-filter-wrap"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous day" disabled={selectedDailyIndex === 0} onClick={() => setDailyIndex((current) => Math.max(0, Math.min(current, dailyOptions.length - 1) - 1))}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleDayTabs.map(({ date, index }) => <button type="button" key={date} className={`day-tab presentation-day-tab${selectedDailyIndex === index ? " day-tab--active" : ""}`} aria-pressed={selectedDailyIndex === index} onClick={() => setDailyIndex(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>)}</div><button type="button" className="day-arrow" aria-label="Next day" disabled={selectedDailyIndex >= dailyOptions.length - 1} onClick={() => setDailyIndex((current) => Math.min(dailyOptions.length - 1, current + 1))}><ChevronRight size={19} /></button></div></div>}
     {isPresentationMemberView ? <section className="presentation-topic-library" aria-label="Presentation topics">
       <div className="presentation-topics-heading"><span className="eyebrow">TOPIC</span><p>Choose a topic to view and download its materials.</p></div>
       <div className="presentation-topic-list">
@@ -2562,7 +2559,7 @@ function MaterialsPage({ materials, programs, isAdmin, isRegularMember, onAdd, o
         })}
         {!presentationTopicGroups.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">PRESENTATIONS</span><h2>{loading ? "Gathering presentations…" : selectedDailyDate ? "No presentations for this day." : "No presentations are available yet."}</h2><p>{loading ? "Topic materials will appear here." : "When a presentation is shared for this topic or day, you’ll find it here."}</p></div>}
       </div>
-    </section> : isProgramFlowMemberView ? <section className="presentation-topic-library" aria-label="Program flow sessions">
+    </section> : isProgramFlowView ? <section className="presentation-topic-library" aria-label="Program flow sessions">
       <div className="presentation-topics-heading"><span className="eyebrow">SESSION</span><p>Choose a session to view and download its materials.</p></div>
       <div className="presentation-topic-list">
         {programFlowSessionGroups.map((group) => {
@@ -2604,16 +2601,25 @@ function MaterialsTeaser({ materials, onOpen, onDownload }: { materials: Materia
   return <section className="content-wrap materials-teaser"><div className="teaser-copy"><span className="eyebrow">TAKE IT WITH YOU</span><h2>Good ideas are<br /><i>meant to be shared.</i></h2><p>Find program flows, communication letters, guides, and other materials shared by the community.</p><button className="text-action" onClick={onOpen}>Visit the resource shelf <ArrowRight size={16} /></button></div><div className="teaser-shelf"><div className="shelf-top"><span>THE SHARED SHELF</span><span>{String(materials.length).padStart(2, "0")} ITEMS <ArrowUpRight size={13} /></span></div><div className="shelf-items">{materials.length ? materials.slice(0, 3).map((item, index) => <div className={`shelf-item shelf-item--${index}`} key={item.id}><span className="shelf-file-icon"><FileText size={16} /></span><span><strong>{item.name}</strong><small>{item.category}</small></span><button className="shelf-open" type="button" onClick={() => onDownload(item, getMaterialAttachments(item)[0])} aria-label={`Download ${item.name}`} title={`Download ${item.name}`}><Download size={15} /></button></div>) : <div className="shelf-empty"><FileText size={18} /><span>No materials have been added yet.</span></div>}</div><div className="shelf-bottom"><span><span className="online-dot" /> Shared resources</span><span>CARAGA REGION XIII</span></div></div></section>;
 }
 
-function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initialProgram: Program | null; programs: Program[]; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
-  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map(normalizeProgramSession) : [{ date: "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
+function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: Program | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
+  const [sessions, setSessions] = useState<ProgramSession[]>(() => initialProgram?.flow?.length ? initialProgram.flow.map((entry) => {
+    const session = normalizeProgramSession(entry);
+    if (session.topics?.length) return session;
+    const legacyTopics = initialProgram.keynoteTopics?.filter((item) => item.date === session.date && item.session.trim() === session.session.trim()).map((item) => item.topic.trim()).filter(Boolean) ?? [];
+    return { ...session, topics: legacyTopics };
+  }) : [{ date: "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
   const [eventDateFrom, setEventDateFrom] = useState(initialProgram?.dateFrom ?? "");
   const [eventDateTo, setEventDateTo] = useState(initialProgram?.dateTo ?? "");
-  const [keynoteTopics, setKeynoteTopics] = useState<ProgramKeynoteTopic[]>(() => initialProgram?.keynoteTopics?.length ? initialProgram.keynoteTopics.map((item) => ({ ...item })) : [{ date: "", session: "", topic: "" }]);
-  const keynoteDateOptions = useMemo(() => dateOptionsBetween(eventDateFrom, eventDateTo), [eventDateFrom, eventDateTo]);
-  const savedTopicOptions = useMemo(() => Array.from(new Set([
-    ...programs.flatMap((program) => program.keynoteTopics?.map((item) => item.topic.trim()).filter(Boolean) ?? []),
-    ...keynoteTopics.map((item) => item.topic.trim()).filter(Boolean),
-  ])).sort((a, b) => a.localeCompare(b)), [keynoteTopics, programs]);
+  const [selectedFlowDate, setSelectedFlowDate] = useState(initialProgram?.dateFrom ?? "");
+  const programDays = useMemo(() => dateOptionsBetween(eventDateFrom, eventDateTo), [eventDateFrom, eventDateTo]);
+  // Keep pre-existing sessions reachable if an editor changes the program date range.
+  const flowDays = useMemo(() => Array.from(new Set([...programDays, ...sessions.map((session) => session.date).filter(Boolean)])).sort(), [programDays, sessions]);
+  const selectedFlowIndex = Math.max(0, flowDays.indexOf(selectedFlowDate) >= 0 ? flowDays.indexOf(selectedFlowDate) : 0);
+  const activeFlowDate = flowDays[selectedFlowIndex] ?? "";
+  const flowWindowStart = Math.min(Math.max(0, selectedFlowIndex - 1), Math.max(0, flowDays.length - 3));
+  const visibleFlowDays = flowDays.slice(flowWindowStart, flowWindowStart + 3);
+  const visibleSessionRows = sessions.map((item, index) => ({ item, index }))
+    .filter(({ item }) => !activeFlowDate || item.date === activeFlowDate || (!item.date && selectedFlowIndex === 0));
 
   const updateSession = (index: number, updates: Partial<ProgramSession>) => setSessions((current) => current.map((session, i) => i === index ? { ...session, ...updates } : session));
   const updateSessionTopic = (sessionIndex: number, topicIndex: number, value: string) => setSessions((current) => current.map((session, i) => {
@@ -2623,25 +2629,17 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
   }));
   const addSessionTopic = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: [...(session.topics?.length ? session.topics : [""]), ""] } : session));
   const removeSessionTopic = (sessionIndex: number, topicIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: (session.topics?.length ? session.topics : [""]).filter((_, j) => j !== topicIndex) } : session));
+  const toggleSessionTopics = (sessionIndex: number, enabled: boolean) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: enabled ? (session.topics?.length ? session.topics : [""]) : [] } : session));
   const updateResponsible = (sessionIndex: number, personIndex: number, field: keyof ResponsiblePerson, value: string) => setSessions((current) => current.map((session, i) => {
     if (i !== sessionIndex) return session;
     const people = responsiblePeople(session.responsible);
     return { ...session, responsible: people.map((person, j) => j === personIndex ? { ...person, [field]: value } : person) };
   }));
-  const addSession = () => setSessions((current) => [...current, { date: current[0]?.date || "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
+  const addSession = () => setSessions((current) => [...current, { date: activeFlowDate || eventDateFrom || current[0]?.date || "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
   const addResponsible = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: [...responsiblePeople(session.responsible), emptyResponsiblePerson()] } : session));
   const removeResponsible = (sessionIndex: number, personIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: responsiblePeople(session.responsible).filter((_, j) => j !== personIndex) } : session));
-  const updateKeynoteTopic = (index: number, updates: Partial<ProgramKeynoteTopic>) => setKeynoteTopics((current) => current.map((item, i) => i === index ? { ...item, ...updates } : item));
-  const syncKeynoteDates = (from: string, to: string) => {
-    const availableDates = dateOptionsBetween(from, to);
-    if (availableDates.length) {
-      setKeynoteTopics((current) => current.map((item) => ({ ...item, date: item.date ? (availableDates.includes(item.date) ? item.date : availableDates[0]) : "" })));
-    }
-  };
-  const addKeynoteTopic = () => setKeynoteTopics((current) => [...current, { date: keynoteDateOptions[0] ?? "", session: "", topic: "" }]);
-
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className="form-modal program-editor" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}>
+  return <div className="modal-backdrop program-editor-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="form-modal program-editor program-editor--fullscreen" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}>
       <div className="form-modal-head">
         <div><span className="eyebrow">PROGRAM EDITOR</span><h2>{initialProgram ? "Update program" : "Build a program"}<span>.</span></h2><p>Set the event details and add the first sessions to the daily flow.</p></div>
         <button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button>
@@ -2650,13 +2648,10 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
         event.preventDefault();
         const target = event.currentTarget;
         const flow = target.querySelector<HTMLInputElement>("[name=flowJson]");
-        const topics = target.querySelector<HTMLInputElement>("[name=keynoteTopicsJson]");
         if (flow) flow.value = JSON.stringify(sessions);
-        if (topics) topics.value = JSON.stringify(keynoteTopics);
         onCreate(event);
       }}>
         <input type="hidden" name="flowJson" value={JSON.stringify(sessions)} readOnly />
-        <input type="hidden" name="keynoteTopicsJson" value={JSON.stringify(keynoteTopics)} readOnly />
         <div className="editor-grid">
           <Field label="Event title"><input autoComplete="off" name="eventTitle" defaultValue={initialProgram?.eventTitle ?? ""} placeholder="e.g. Regional learning exchange" required /></Field>
           <Field label="Theme"><input autoComplete="off" name="theme" defaultValue={initialProgram?.theme ?? ""} placeholder="e.g. Sustainable agriculture, thriving communities" required /></Field>
@@ -2664,37 +2659,20 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
           <Field label="Date from"><input autoComplete="off" type="date" name="dateFrom" value={eventDateFrom} onChange={(event) => {
             const value = event.target.value;
             setEventDateFrom(value);
-            syncKeynoteDates(value, eventDateTo);
+            setSelectedFlowDate(value);
             if (!sessions[0]?.date) updateSession(0, { date: value });
           }} required /></Field>
           <Field label="Date to"><input autoComplete="off" type="date" name="dateTo" value={eventDateTo} onChange={(event) => {
-            const value = event.target.value;
-            setEventDateTo(value);
-            syncKeynoteDates(eventDateFrom, value);
+            setEventDateTo(event.target.value);
           }} required /></Field>
           <Field label="Short description"><input autoComplete="off" name="description" defaultValue={initialProgram?.description ?? ""} placeholder="A short note for participants" /></Field>
         </div>
-        <section className="editor-keynote-topics" aria-label="Keynote sessions and topics">
-          <div className="editor-keynote-head">
-            <div><span className="eyebrow">KEYNOTE SESSIONS &amp; TOPICS</span><p>Assign a topic to a keynote session date.</p></div>
-            <button type="button" className="text-action" onClick={addKeynoteTopic}><Plus size={15} /> Add</button>
-          </div>
-          <div className="editor-keynote-topic-list">
-            {keynoteTopics.map((item, index) => <div className="editor-keynote-topic-row" key={index}>
-              <span className="editor-keynote-topic-num">{String(index + 1).padStart(2, "0")}</span>
-              <label className="session-edit-field"><span>Date</span><select aria-label={`Keynote topic date ${index + 1}`} value={item.date} onChange={(event) => updateKeynoteTopic(index, { date: event.target.value })}>
-                <option value="">Select a date</option>{keynoteDateOptions.map((date) => <option key={date} value={date}>{displayDate(date)}</option>)}
-              </select></label>
-              <label className="session-edit-field"><span>Keynote Session</span><select aria-label={`Keynote session ${index + 1}`} value={item.session} onChange={(event) => updateKeynoteTopic(index, { session: event.target.value })}>
-                <option value="">Select a keynote session</option>{keynoteSessionOptions.map((session) => <option key={session} value={session}>{session}</option>)}
-              </select></label>
-              <label className="session-edit-field"><span>Topic</span><input autoComplete="off" aria-label={`Topic ${index + 1}`} placeholder="Enter the keynote topic" value={item.topic} onChange={(event) => updateKeynoteTopic(index, { topic: event.target.value })} /></label>
-              <button type="button" aria-label={`Remove keynote topic ${index + 1}`} className="remove-session" disabled={keynoteTopics.length === 1} onClick={() => setKeynoteTopics((current) => current.filter((_, i) => i !== index))}><X size={15} /></button>
-            </div>)}
-          </div>
-        </section>
         <div className="editor-session-head"><div><span className="eyebrow">DAILY PROGRAM FLOW</span><p>Each session has its own date, start and end time, and responsible people.</p></div><button type="button" className="text-action" onClick={addSession}><Plus size={15} /> Add a session</button></div>
-        <div className="session-edit-list">{sessions.map((item, index) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}>
+        {flowDays.length > 0 && <div className="program-editor-daily-filter"><span className="presentation-daily-filter-label">Daily Filter</span><div className="day-controls presentation-day-controls"><button type="button" className="day-arrow" aria-label="Previous program day" disabled={selectedFlowIndex <= 0} onClick={() => setSelectedFlowDate(flowDays[Math.max(0, selectedFlowIndex - 1)])}><ChevronLeft size={19} /></button><div className="day-tabs presentation-day-tabs">{visibleFlowDays.map((date) => {
+          const dayIndex = programDays.indexOf(date);
+          return <button type="button" key={date} className={`day-tab presentation-day-tab${activeFlowDate === date ? " day-tab--active" : ""}`} aria-pressed={activeFlowDate === date} onClick={() => setSelectedFlowDate(date)}><span>{dayIndex >= 0 ? `DAY ${String(dayIndex + 1).padStart(2, "0")}` : "OTHER DAY"}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>;
+        })}</div><button type="button" className="day-arrow" aria-label="Next program day" disabled={selectedFlowIndex >= flowDays.length - 1} onClick={() => setSelectedFlowDate(flowDays[Math.min(flowDays.length - 1, selectedFlowIndex + 1)])}><ChevronRight size={19} /></button></div></div>}
+        <div className="session-edit-list">{visibleSessionRows.map(({ item, index }) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}>
           <div className="session-edit-main"><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span>
             <label className="session-edit-field session-edit-field--date"><span>Session date</span><input autoComplete="off" type="date" value={item.date} onChange={(event) => updateSession(index, { date: event.target.value })} required /></label>
             <label className="session-edit-field session-edit-field--start"><span>Start time</span><input autoComplete="off" lang="en-US" type="time" aria-label="Start time (HH:MM AM/PM)" value={sessionTimeRange(item).startTime} onChange={(event) => updateSession(index, { startTime: event.target.value })} required /></label>
@@ -2702,18 +2680,15 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
             <label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label>
             <button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button>
           </div>
-          <div className="session-edit-topics">
-            <div className="session-edit-topics-head"><span>Topics</span><button type="button" className="text-action" onClick={() => addSessionTopic(index)}><Plus size={13} /> Add topic</button></div>
-            <div className="session-edit-topic-list">{(item.topics?.length ? item.topics : [""]).map((topic, topicIndex) => <div className="session-edit-topic-row" key={topicIndex}>
-              <select aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)}>
-                <option value="">Select a saved topic</option>
-                {topic && !savedTopicOptions.includes(topic) && <option value={topic}>{topic}</option>}
-                {savedTopicOptions.map((savedTopic) => <option key={savedTopic} value={savedTopic}>{savedTopic}</option>)}
-              </select>
-              <button type="button" className="remove-session" aria-label={`Remove topic ${topicIndex + 1} from session ${index + 1}`} disabled={(item.topics?.length ?? 0) <= 1} onClick={() => removeSessionTopic(index, topicIndex)}><X size={14} /></button>
-            </div>)}</div>
-          </div>
           <div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>
+            <label className="session-topic-toggle"><input type="checkbox" aria-label="Add topics to this session" checked={Boolean(item.topics?.length)} onChange={(event) => toggleSessionTopics(index, event.target.checked)} /><span>Topic</span></label>
+            {Boolean(item.topics?.length) && <div className="session-edit-topic-fields">
+              <div className="session-edit-topics-head"><span>Topics for this session</span><button type="button" className="text-action" onClick={() => addSessionTopic(index)}><Plus size={13} /> Add topic</button></div>
+              <div className="session-edit-topic-list">{item.topics!.map((topic, topicIndex) => <div className="session-edit-topic-row" key={topicIndex}>
+                <input autoComplete="off" aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} placeholder="Enter a topic" value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)} />
+                <button type="button" className="remove-session" aria-label={`Remove topic ${topicIndex + 1} from session ${index + 1}`} disabled={(item.topics?.length ?? 0) <= 1} onClick={() => removeSessionTopic(index, topicIndex)}><X size={14} /></button>
+              </div>)}</div>
+            </div>}
             {responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}>
               <input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} />
               <input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} />
@@ -2725,7 +2700,7 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
               <button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable) || responsiblePeople(item.responsible).length <= 1} onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button>
             </div>)}
           </div>
-        </section>)}</div>
+        </section>)}{activeFlowDate && visibleSessionRows.length === 0 && <div className="session-edit-empty">No sessions for {displayDate(activeFlowDate, { month: "long", day: "numeric", year: "numeric" })} yet. Use <strong>Add a session</strong> to add one to this day.</div>}</div>
         <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div>
       </form>
     </div>
@@ -2745,10 +2720,10 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
   const [category, setCategory] = useState<MaterialCategory>(initialMaterial?.category ?? "Guidelines");
   const [topic, setTopic] = useState(initialMaterial?.topic ?? "");
   const [selectedProgramId, setSelectedProgramId] = useState(initialMaterial?.programId ?? "");
-  const [keynoteSession, setKeynoteSession] = useState(initialMaterial?.keynoteSession ?? "");
+  const [session, setSession] = useState(initialMaterial ? materialSession(initialMaterial) : "");
   const selectedProgram = programs.find((program) => program.id === selectedProgramId);
-  const savedKeynoteSessions = useMemo(() => Array.from(new Set(selectedProgram?.keynoteTopics?.map((item) => item.session.trim()).filter(Boolean) ?? [])).sort((a, b) => a.localeCompare(b)), [selectedProgram]);
-  const savedTopics = useMemo(() => Array.from(new Set(programs.flatMap((program) => program.keynoteTopics?.map((item) => item.topic.trim()).filter(Boolean) ?? []))).sort((a, b) => a.localeCompare(b)), [programs]);
+  const savedFlowSessions = useMemo(() => Array.from(new Set(selectedProgram?.flow?.map((item) => item.session.trim()).filter(Boolean) ?? [])).sort((a, b) => a.localeCompare(b)), [selectedProgram]);
+  const savedTopics = useMemo(() => Array.from(new Set(programs.flatMap((program) => programTopicEntries(program).map((item) => item.topic)))).sort((a, b) => a.localeCompare(b)), [programs]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2774,12 +2749,12 @@ function MaterialModal({ programs, initialMaterial, onClose, onCreate, busy }: {
     <div className="form-modal material-editor" role="dialog" aria-modal="true" aria-label={initialMaterial ? "Edit a material" : "Add a material"}>
       <div className="form-modal-head"><div><span className="eyebrow">RESOURCE LIBRARY</span><h2>{initialMaterial ? "Edit a material" : "Add a material"}<span>.</span></h2><p>Upload one or more files, or link a resource for a published program.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       <form onSubmit={handleSubmit}>
-        <Field label="Program"><select name="programId" required value={selectedProgramId} onChange={(event) => { setSelectedProgramId(event.target.value); setKeynoteSession(""); }}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+        <Field label="Program"><select name="programId" required value={selectedProgramId} onChange={(event) => { setSelectedProgramId(event.target.value); setSession(""); }}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
         <Field label="Category"><select name="category" value={category} onChange={(event) => setCategory(event.target.value as MaterialCategory)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></Field>
-        {category === "Program Flow" && <Field label="Keynote Session"><select name="keynoteSession" value={keynoteSession} required onChange={(event) => setKeynoteSession(event.target.value)}>
-          <option value="">{savedKeynoteSessions.length ? "Select a saved keynote session" : "No saved keynote sessions for this program"}</option>
-          {keynoteSession && !savedKeynoteSessions.includes(keynoteSession) && <option value={keynoteSession}>{keynoteSession}</option>}
-          {savedKeynoteSessions.map((session) => <option key={session} value={session}>{session}</option>)}
+        {category === "Program Flow" && <Field label="Session"><select name="session" value={session} required onChange={(event) => setSession(event.target.value)}>
+          <option value="">{savedFlowSessions.length ? "Select a saved session" : "Add a session to the program flow first"}</option>
+          {session && !savedFlowSessions.includes(session) && <option value={session}>{session}</option>}
+          {savedFlowSessions.map((session) => <option key={session} value={session}>{session}</option>)}
         </select></Field>}
         {category === "Presentation" && <Field label="Topic"><select name="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
           <option value="">{savedTopics.length ? "Select a saved topic" : "No saved topics available"}</option>

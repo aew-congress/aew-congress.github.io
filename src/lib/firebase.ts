@@ -130,7 +130,9 @@ export type Material = {
   category: MaterialCategory;
   /** Optional topic tag for presentation materials. */
   topic?: string;
-  /** Optional keynote-session tag for program-flow materials. */
+  /** Program Flow session title; falls back to the legacy keynoteSession field on old records. */
+  session?: string;
+  /** @deprecated Retained to read existing material records. */
   keynoteSession?: string;
   /** Optional image attachments, used by program-flow materials. */
   images?: MaterialImage[];

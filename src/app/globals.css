@@ -178,6 +178,21 @@ img { -webkit-user-drag: none; user-select: none; }
 .session-time { color: #838a7b; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; vertical-align: middle; }
 .session-name { color: #31372c; font-size: 14px; font-weight: 700; vertical-align: middle; }.session-title { font-size: 14px; font-weight: 700; }.session-topics { margin: 6px 0 0; padding-left: 18px; color: #71796a; font-size: 12px; font-weight: 450; line-height: 1.55; }.session-topics li + li { margin-top: 2px; }
 .session-person { color: #71796a; font-size: 12px; }
+.schedule-table .session-details-cell { width: auto; height: auto; padding: 0; vertical-align: top; }
+.session-details-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.session-details-table th { height: auto; width: auto; padding: 15px 14px 10px; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #edf0e9; color: #31372c; letter-spacing: normal; }
+.schedule-table .session-details-table th:first-child { height: auto; width: auto; padding: 15px 14px 10px; background: transparent; border: 0; border-bottom: 1px solid #edf0e9; color: #31372c; letter-spacing: normal; }
+.session-details-table th .session-title { font-size: 14px; font-weight: 750; }
+.schedule-table .session-details-table td { height: auto; padding: 9px 14px; vertical-align: top; border-bottom: 1px solid #e5e8df; }
+.session-details-topic { width: 58%; color: #71796a; font-size: 12px; font-weight: 450; line-height: 1.55; }
+.schedule-table .session-details-table td:first-child { width: 58%; padding: 9px 14px; }
+.session-details-topic > span { display: flex; align-items: flex-start; gap: 8px; }
+.session-details-topic i { flex: 0 0 9px; color: var(--olive); font-style: normal; font-weight: 800; }
+.session-details-responsible { width: 42%; color: #71796a; font-size: 12px; line-height: 1.45; }
+.session-details-responsible > span { display: grid; gap: 2px; }
+.session-details-responsible strong { color: #59614f; font-size: 11px; font-weight: 700; }
+.session-details-responsible small { color: #92998a; font-size: 10px; }
+.session-details-pair:last-child td { border-bottom: 0; }
 .schedule-table .session-topic-title-row > td { padding-top: 15px; padding-bottom: 9px; border-bottom: 0; }
 .schedule-table .session-topic-row > td { height: auto; padding-top: 9px; padding-bottom: 9px; vertical-align: top; border-bottom: 1px solid #e5e8df; }
 .schedule-table tbody tr.session-topic-row td { border-bottom: 1px solid #e5e8df; }
@@ -864,6 +879,10 @@ img { -webkit-user-drag: none; user-select: none; }
 
 .presentation-daily-filter-wrap { display: grid; gap: 8px; margin: -7px 0 17px; }
 .presentation-daily-filter-label { color: #7c8374; font-size: 10px; font-weight: 750; letter-spacing: .08em; }
+.program-editor-daily-filter { display: grid; justify-items: start; gap: 7px; margin: 0 0 10px; }
+.program-editor-daily-filter .day-tab { min-width: 96px; }
+.program-editor--fullscreen .session-edit-empty { padding: 20px; border: 1px dashed #dce3d0; border-radius: 9px; color: #899080; background: #fbfcf9; text-align: center; font-size: 12px; }
+.program-editor--fullscreen .session-edit-empty strong { color: var(--olive); }
 .presentation-topics-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 9px; }
 .presentation-topics-heading .eyebrow { color: #858d78; font-size: 10px; }
 .presentation-topics-heading p { margin: 0; color: #92988c; font-size: 11px; }
@@ -888,13 +907,10 @@ img { -webkit-user-drag: none; user-select: none; }
 .presentation-material-info small { overflow: hidden; color: #909789; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .presentation-download-button { flex: 0 0 auto; min-height: 33px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid #dce5cf; border-radius: 8px; background: #f8faf4; color: var(--olive); font-size: 11px; font-weight: 750; cursor: pointer; }
 .presentation-download-button:hover { border-color: #bdcda1; background: #eef4e4; }
-.session-edit-topics { margin: 12px 0 0 33px; padding-top: 10px; border-top: 1px solid #eef0e9; }
 .session-edit-topics-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; color: #7d8573; font-size: 10px; font-weight: 750; }
 .session-edit-topics-head .text-action { padding: 2px 0; font-size: 10px; }
 .session-edit-topic-list { display: grid; gap: 6px; }
 .session-edit-topic-row { display: grid; grid-template-columns: minmax(0, 1fr) 25px; align-items: center; gap: 8px; }
-.session-edit-topic-row select { min-width: 0; width: 100%; height: 38px; border: 1px solid #e6e9e1; border-radius: 8px; outline: 0; padding: 0 9px; background: #fcfdfa; color: #576048; font-size: 12px; }
-.session-edit-topic-row select:focus { border-color: #aeba99; box-shadow: 0 0 0 3px #455e1510; }
 @media (max-width: 760px) {
   .presentation-topics-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .presentation-topic-toggle { grid-template-columns: minmax(0, 1fr) auto 18px; gap: 8px; padding-inline: 12px; }
@@ -902,11 +918,41 @@ img { -webkit-user-drag: none; user-select: none; }
   .program-flow-image-gallery { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; }
   .presentation-material-row { gap: 8px; }
   .presentation-download-button { min-height: 31px; padding-inline: 8px; font-size: 10px; }
-  .session-edit-topics { margin-left: 29px; }
 }
 
 @media (max-width: 760px) {
   .topbar .brand-mark { width: 58px; height: 44px; }
   .topbar .brand-mark img { width: 100%; height: 100%; }
   .topbar .primary-nav { background: #d4a309; border-bottom-color: #e3b31d; }
+}
+
+.program-editor-backdrop { padding: 0; }
+.program-editor--fullscreen { display: flex; flex-direction: column; width: 100vw; height: 100dvh; max-height: 100dvh; padding: clamp(16px, 2.4vw, 38px) clamp(16px, 4vw, 64px); overflow: hidden; border-radius: 0; }
+.program-editor--fullscreen > .form-modal-head { flex: 0 0 auto; }
+.program-editor--fullscreen > form { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #d7dfc7 transparent; scrollbar-width: thin; }
+.program-editor--fullscreen .editor-grid { flex: 0 0 auto; }
+.program-editor--fullscreen .session-edit-list { max-height: none; overflow: visible; }
+.program-editor--fullscreen .form-modal-actions { position: sticky; bottom: 0; z-index: 2; flex: 0 0 auto; margin-top: auto; padding: 14px 0 max(4px, env(safe-area-inset-bottom)); border-top: 1px solid #e9ece5; background: #fff; }
+.session-topic-toggle { display: inline-flex; align-items: center; gap: 7px; margin: 1px 0 8px; color: #59614f; font-size: 11px; font-weight: 750; cursor: pointer; }
+.session-topic-toggle input { width: 15px; height: 15px !important; margin: 0; padding: 0 !important; accent-color: #4d681b; cursor: pointer; }
+.session-edit-topic-fields { margin: 0 0 12px; padding: 10px; border: 1px solid #e8ebe2; border-radius: 9px; background: #fbfcf9; }
+.session-edit-topics-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 7px; color: #7d8573; font-size: 10px; font-weight: 750; }
+.session-edit-topic-list { display: grid; gap: 6px; }
+.session-edit-topic-row { display: grid; grid-template-columns: minmax(0, 1fr) 25px; align-items: center; gap: 6px; }
+.session-edit-topic-row input { width: 100%; }
+@media (max-width: 760px) {
+  .program-editor--fullscreen { width: 100vw; height: 100dvh; max-height: 100dvh; padding: 14px 12px max(10px, env(safe-area-inset-bottom)); }
+  .program-editor--fullscreen .form-modal-head { padding-bottom: 12px; }
+  .program-editor--fullscreen .editor-grid { grid-template-columns: minmax(0, 1fr); padding: 12px 0; }
+  .program-editor--fullscreen .editor-grid .field { grid-column: 1; }
+  .program-editor--fullscreen .session-edit-list { overflow: visible; }
+  .program-editor--fullscreen .session-edit-row { min-width: 0; }
+  .program-editor--fullscreen .session-edit-responsibles { margin-left: 29px; }
+}
+@media (max-width: 500px) {
+  .program-editor--fullscreen { padding-inline: 10px; }
+  .program-editor--fullscreen .form-modal-head h2 { font-size: 22px; }
+  .program-editor--fullscreen .session-edit-row { padding: 10px 8px; }
+  .program-editor--fullscreen .responsible-edit-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; }
+  .program-editor--fullscreen .session-edit-topic-fields { padding: 8px; }
 }

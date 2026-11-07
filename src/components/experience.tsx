@@ -1327,7 +1327,7 @@ export default function Experience() {
     >
       <header className="topbar">
         <a href="/" className="brand" aria-label="AEW Congress home" onClick={(event) => { event.preventDefault(); window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search); setSection("home"); }}>
-          <span className="brand-mark"><img src="/AEW_logo_1.png" alt="" /></span>
+          <span className="brand-mark"><img src="/AEW_logo_1_white.png" alt="" /></span>
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
         </a>
         {signedIn && <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">

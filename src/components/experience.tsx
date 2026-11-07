@@ -2325,20 +2325,26 @@ function JudgeScoreSheet({ contest, judgeUid, onClose }: { contest: ContestMecha
 function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
+  const lastEditorValueRef = useRef(value);
+  const needsEditorSyncRef = useRef(true);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceValue, setSourceValue] = useState("");
   const [fullScreen, setFullScreen] = useState(false);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!sourceMode && editor) {
-      const safeHtml = sanitizeContestMechanicsHtml(value);
-      if (editor.innerHTML !== safeHtml) editor.innerHTML = safeHtml;
-    }
+    if (sourceMode || !editor) return;
+    if (!needsEditorSyncRef.current && value === lastEditorValueRef.current) return;
+    const safeHtml = sanitizeContestMechanicsHtml(value);
+    if (editor.innerHTML !== safeHtml) editor.innerHTML = safeHtml;
+    lastEditorValueRef.current = value;
+    needsEditorSyncRef.current = false;
   }, [sourceMode, value]);
 
   function syncEditor() {
-    onChange(editorRef.current?.innerHTML ?? "");
+    const html = editorRef.current?.innerHTML ?? "";
+    lastEditorValueRef.current = html;
+    onChange(html);
   }
 
   function preserveSelection() {
@@ -2390,6 +2396,8 @@ function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; on
       return;
     }
     const safeHtml = sanitizeContestMechanicsHtml(sourceValue);
+    lastEditorValueRef.current = safeHtml;
+    needsEditorSyncRef.current = true;
     onChange(safeHtml);
     setSourceValue(safeHtml);
     setSourceMode(false);

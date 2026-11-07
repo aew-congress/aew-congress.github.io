@@ -2086,11 +2086,11 @@ function ProgramModal({ initialProgram, programs, onClose, onCreate }: { initial
           <div className="session-edit-topics">
             <div className="session-edit-topics-head"><span>Topics</span><button type="button" className="text-action" onClick={() => addSessionTopic(index)}><Plus size={13} /> Add topic</button></div>
             <div className="session-edit-topic-list">{(item.topics?.length ? item.topics : [""]).map((topic, topicIndex) => <div className="session-edit-topic-row" key={topicIndex}>
-              <label className="session-edit-field"><span>Topic</span><select aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)}>
+              <select aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)}>
                 <option value="">Select a saved topic</option>
                 {topic && !savedTopicOptions.includes(topic) && <option value={topic}>{topic}</option>}
                 {savedTopicOptions.map((savedTopic) => <option key={savedTopic} value={savedTopic}>{savedTopic}</option>)}
-              </select></label>
+              </select>
               <button type="button" className="remove-session" aria-label={`Remove topic ${topicIndex + 1} from session ${index + 1}`} disabled={(item.topics?.length ?? 0) <= 1} onClick={() => removeSessionTopic(index, topicIndex)}><X size={14} /></button>
             </div>)}</div>
           </div>

@@ -679,3 +679,7 @@ img { -webkit-user-drag: none; user-select: none; }
   .site-shell--confirmed-attendees .confirmed-attendees-page .confirmed-attendees-table th:nth-child(6) { width: 12%; }
   .site-shell--confirmed-attendees .confirmed-attendees-page .empty-table { height: auto !important; padding: 14mm 2mm !important; }
 }
+.manage-action-button--visible { color: #506b1d; background: #f0f6e4; border-color: #dfe9cd; }
+.manage-action-button--visible:hover { color: #405915; background: #e8f1d8; border-color: #cbd9b4; }
+.manage-action-button--hidden { color: #92988b; background: #f5f6f3; border-color: #e5e8df; }
+.manage-action-button--hidden:hover { color: #66705a; background: #edf0e9; border-color: #d7ddcc; }

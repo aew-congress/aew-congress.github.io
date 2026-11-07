@@ -584,6 +584,7 @@ export default function Experience() {
   }
 
   async function downloadMaterial(material: Material) {
+    if (!isAdmin && material.enabled === false) return;
     if (!isUploadThingFile(material.url)) {
       const anchor = document.createElement("a");
       anchor.href = material.url;
@@ -895,6 +896,7 @@ export default function Experience() {
         category,
         name: name || url.split("/").pop() || "Program resource",
         url,
+        enabled: editingMaterial ? editingMaterial.enabled !== false : true,
         updatedAt: serverTimestamp(),
       };
       if (editingMaterial) {
@@ -906,6 +908,16 @@ export default function Experience() {
       setMaterialModal(false);
       setEditingMaterial(null);
       setToast({ kind: "success", text: editingMaterial ? "Material updated." : "Material added to the resource library." });
+    } catch (error) { showError(error); }
+  }
+
+  async function toggleMaterialVisibility(material: Material) {
+    if (!user || !isAdmin) return;
+    const enabled = material.enabled === false;
+    try {
+      await getVerifiedAdmin();
+      await updateDoc(doc(db, "materials", material.id), { enabled, updatedAt: serverTimestamp() });
+      setToast({ kind: "success", text: enabled ? "Material is now visible to regular users." : "Material is hidden from regular users." });
     } catch (error) { showError(error); }
   }
 
@@ -1212,7 +1224,7 @@ export default function Experience() {
         {section === "approval" && isSuperadmin ? (
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
-          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
+          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
@@ -1261,7 +1273,7 @@ export default function Experience() {
               <div className="schedule-footer"><span><span className="footer-spark">✳</span>Every session is a chance to share what works.</span><button aria-label="Print schedule" title="Print the schedule or save as PDF" onClick={() => window.print()}><Printer size={15} /> Print</button></div>
             </section> : <section className="content-wrap schedule-empty" id="schedule"><CalendarDays size={23} /><span className="eyebrow">PROGRAM FLOW</span><h2>{loading ? "Loading program flow..." : "No program flow available yet."}</h2><p>{loading ? "The daily schedule will appear when program data loads." : "A daily schedule will appear here after a program is published."}</p>{isAdmin && !loading && <button className="button button--olive" onClick={() => openProgramEditor()}><Plus size={16} /> Create a program</button>}</section>}
 
-            {signedIn && <MaterialsTeaser materials={materials} onOpen={() => setSection("materials")} onDownload={downloadMaterial} />}
+            {signedIn && <MaterialsTeaser materials={isAdmin ? materials : materials.filter((material) => material.enabled !== false)} onOpen={() => setSection("materials")} onDownload={downloadMaterial} />}
             {cloudIssue && <div className="content-wrap cloud-notice"><CircleHelp size={16} /><span>Live data isn’t connected yet. {cloudIssue === "Missing or insufficient permissions." ? "Add the provided Firestore rules and enable sign-in in Firebase." : cloudIssue}</span></div>}
             </>}
           </>
@@ -1684,17 +1696,17 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
   </div>;
 }
 
-function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
+function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onToggleMaterialVisibility, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
   programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
   onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
-  onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void;
+  onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void; onToggleMaterialVisibility: (material: Material) => void;
   onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; backLabel: string; onBack: () => void;
 }) {
-  const actions = (label: string, onEdit: () => void, onDelete: () => void) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
+  const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
   return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> {backLabel}</button><div className="section-heading"><div><span className="eyebrow">ADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
     <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest mechanics</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest mechanics have been added yet.</p>}</div>
-    <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material))}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material), { enabled: material.enabled !== false, onToggle: () => onToggleMaterialVisibility(material) })}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
   </div></div>;
 }
 
@@ -1782,12 +1794,13 @@ function MaterialsPage({ materials, programs, isAdmin, onAdd, onDownload, loadin
   const [category, setCategory] = useState("All resources");
   const [program, setProgram] = useState("All programs");
   const [queryText, setQueryText] = useState("");
-  const displayed = materials.filter((material) => (category === "All resources" || material.category === category) && (program === "All programs" || material.programId === program) && (!queryText || `${material.name} ${material.programTitle}`.toLowerCase().includes(queryText.toLowerCase())));
+  const availableMaterials = isAdmin ? materials : materials.filter((material) => material.enabled !== false);
+  const displayed = availableMaterials.filter((material) => (category === "All resources" || material.category === category) && (program === "All programs" || material.programId === program) && (!queryText || `${material.name} ${material.programTitle}`.toLowerCase().includes(queryText.toLowerCase())));
   const colorByCategory: Record<string, string> = { Guidelines: "resource-green", Presentation: "resource-yellow", References: "resource-blue", Worksheet: "resource-orange", "Program Flow": "resource-blue", "Communication Letter": "resource-orange" };
   return <div className="content-wrap materials-page"><section className="materials-hero"><div><span className="eyebrow"><FileCheck2 size={14} /> THE RESOURCE SHELF</span><h1>Useful things,<br /><span>within</span> <i>reach.</i></h1><p>Program flows, communication letters, presentations, guides, worksheets, and references shared by the Caraga extension community.</p></div><div className="materials-hero-art"><span className="paper paper--one"><FileText size={22} /><b>FIELD<br />GUIDE</b><i /></span><span className="paper paper--two"><span>01</span><strong>Learn<br />by doing.</strong><i /></span><span className="paper paper--three"><Sparkles size={16} /><small>SHARED<br />KNOWLEDGE</small></span></div></section>
     <div className="resource-toolbar"><label className="search-box"><Search size={16} /><input value={queryText} onChange={(event) => setQueryText(event.target.value)} placeholder="Search materials" aria-label="Search materials" /></label><label className="filter-select"><Filter size={14} /><select value={program} onChange={(event) => setProgram(event.target.value)} aria-label="Filter by program"><option>All programs</option>{programs.map((item) => <option key={item.id} value={item.id}>{item.eventTitle}</option>)}</select><ChevronDown size={13} /></label>{isAdmin && <button className="button button--olive" onClick={onAdd}><Upload size={16} /> Add material</button>}</div>
-    <div className="resource-categories"><button className={category === "All resources" ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory("All resources")}>All resources <span>{materials.length}</span></button>{categories.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory(item)}>{item}<span>{materials.filter((m) => m.category === item).length}</span></button>)}</div>
-    <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />Available to all members</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
+    <div className="resource-categories"><button className={category === "All resources" ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory("All resources")}>All resources <span>{availableMaterials.length}</span></button>{categories.map((item) => <button key={item} className={category === item ? "category-tab category-tab--active" : "category-tab"} onClick={() => setCategory(item)}>{item}<span>{availableMaterials.filter((m) => m.category === item).length}</span></button>)}</div>
+    <div className="resource-grid">{displayed.map((material, index) => <article className={`resource-card ${colorByCategory[material.category] || ""}`} key={material.id} style={{ animationDelay: `${index * 50}ms` }}><div className="resource-card-top"><span className="resource-icon"><FileText size={20} /></span><span className="resource-category">{material.category}</span></div><h3>{material.name}</h3><p>{material.programTitle}</p><div className="resource-card-foot"><span><span className="online-dot" />{isAdmin && material.enabled === false ? "Hidden from regular users" : "Available to all members"}</span><button type="button" onClick={() => onDownload(material)} aria-label={`Download ${material.name}`} title={`Download ${material.name}`}><Download size={17} /></button></div></article>)}
       {!displayed.length && <div className="resource-empty"><div><FileCheck2 size={23} /></div><span className="eyebrow">A LITTLE ROOM TO GROW</span><h2>{loading ? "Gathering your materials…" : "The shelf is ready."}</h2><p>{loading ? "Shared resources will appear here." : "When a program resource is shared, you’ll find it here organized by type."}</p>{isAdmin && <button className="button button--olive" onClick={onAdd}><Plus size={16} /> Add the first material</button>}</div>}
     </div>
   </div>;

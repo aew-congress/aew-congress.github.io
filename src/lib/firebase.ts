@@ -106,6 +106,7 @@ export type Material = {
   category: MaterialCategory;
   name: string;
   url: string;
+  enabled?: boolean;
   createdAt?: unknown;
 };
 

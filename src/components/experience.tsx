@@ -212,7 +212,7 @@ function normalizeProgramSession(item: ProgramSession): ProgramSession {
     date: item.date,
     ...sessionTimeRange(item),
     session: item.session,
-    topics: Array.isArray(item.topics) ? item.topics.map((topic) => String(topic ?? "").trim()).filter(Boolean) : [],
+    topics: Array.isArray(item.topics) ? item.topics.map((topic) => String(topic ?? "").trim()) : [],
     allParticipants: Boolean(item.allParticipants),
     responsibleNotApplicable: Boolean(item.responsibleNotApplicable),
     responsible: responsible.length ? responsible : [emptyResponsiblePerson()],
@@ -998,10 +998,6 @@ export default function Experience() {
     }
     const form = new FormData(event.currentTarget);
     const enteredFlow = JSON.parse(String(form.get("flowJson"))) as ProgramSession[];
-    if (enteredFlow.some((session) => session.topics?.some((topic) => !String(topic).trim()))) {
-      setToast({ kind: "error", text: "Complete or remove each topic before saving the program." });
-      return;
-    }
     const flow = enteredFlow.map(normalizeProgramSession);
     const payload = {
       eventTitle: String(form.get("eventTitle")).trim(),
@@ -1498,7 +1494,7 @@ export default function Experience() {
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
                   const periodKey = `${selectedProgram.id}:${item.date}:${period}`;
                   const periodExpanded = !period || expandedSessionPeriods.has(periodKey);
-                  const topics = (item.topics ?? []).filter(Boolean);
+                  const topics = (item.topics ?? []).map((topic) => String(topic ?? "").trim());
                   const people = responsiblePeople(item.responsible).filter((person) => person.name || person.designation || person.office);
                   const detailRowCount = Math.max(topics.length, item.allParticipants || item.responsibleNotApplicable ? 1 : people.length, 1);
                   const sessionRowClass = `session-row${hoveredTimeGroup === timeGroup ? " session-row--group-hovered" : ""}`;
@@ -1517,7 +1513,7 @@ export default function Experience() {
                         {Array.from({ length: detailRowCount }, (_, detailIndex) => {
                           const person = people[detailIndex];
                           return <tr className="session-details-pair" key={detailIndex}>
-                            <td className="session-details-topic">{topics[detailIndex] && <span><i aria-hidden="true">•</i>{topics[detailIndex]}</span>}</td>
+                            <td className="session-details-topic">{topics[detailIndex]?.trim() && <span><i aria-hidden="true">•</i>{topics[detailIndex]}</span>}</td>
                             {item.allParticipants
                               ? <td className="session-details-responsible session-details-responsible--all"><span className="all-participants-value">All Participants</span></td>
                               : <td className="session-details-responsible">{!item.responsibleNotApplicable && person && <span><strong>{person.name || "Responsible"}</strong>{(person.designation || person.office) && <small>{[person.designation, person.office].filter(Boolean).join(" · ")}</small>}</span>}</td>}
@@ -2763,20 +2759,20 @@ function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: P
   const updateSession = (index: number, updates: Partial<ProgramSession>) => setSessions((current) => current.map((session, i) => i === index ? { ...session, ...updates } : session));
   const updateSessionTopic = (sessionIndex: number, topicIndex: number, value: string) => setSessions((current) => current.map((session, i) => {
     if (i !== sessionIndex) return session;
-    const topics = session.topics?.length ? session.topics : [""];
-    return { ...session, topics: topics.map((topic, j) => j === topicIndex ? value : topic) };
+    const topics = [...(session.topics ?? [])];
+    while (topics.length <= topicIndex) topics.push("");
+    topics[topicIndex] = value;
+    return { ...session, topics };
   }));
-  const addSessionTopic = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: [...(session.topics?.length ? session.topics : [""]), ""] } : session));
-  const removeSessionTopic = (sessionIndex: number, topicIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: (session.topics?.length ? session.topics : [""]).filter((_, j) => j !== topicIndex) } : session));
-  const toggleSessionTopics = (sessionIndex: number, enabled: boolean) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, topics: enabled ? (session.topics?.length ? session.topics : [""]) : [] } : session));
   const updateResponsible = (sessionIndex: number, personIndex: number, field: keyof ResponsiblePerson, value: string) => setSessions((current) => current.map((session, i) => {
     if (i !== sessionIndex) return session;
     const people = responsiblePeople(session.responsible);
+    while (people.length <= personIndex) people.push(emptyResponsiblePerson());
     return { ...session, responsible: people.map((person, j) => j === personIndex ? { ...person, [field]: value } : person) };
   }));
   const addSession = () => setSessions((current) => [...current, { date: activeFlowDate || eventDateFrom || current[0]?.date || "", startTime: "", endTime: "", session: "", allParticipants: false, responsibleNotApplicable: false, responsible: [emptyResponsiblePerson()] }]);
-  const addResponsible = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: [...responsiblePeople(session.responsible), emptyResponsiblePerson()] } : session));
-  const removeResponsible = (sessionIndex: number, personIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: responsiblePeople(session.responsible).filter((_, j) => j !== personIndex) } : session));
+  const addResponsible = (sessionIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: [...responsiblePeople(session.responsible), emptyResponsiblePerson()], topics: [...(session.topics ?? []), ""] } : session));
+  const removeResponsible = (sessionIndex: number, personIndex: number) => setSessions((current) => current.map((session, i) => i === sessionIndex ? { ...session, responsible: responsiblePeople(session.responsible).filter((_, j) => j !== personIndex), topics: (session.topics ?? []).filter((_, j) => j !== personIndex) } : session));
   return <div className="modal-backdrop program-editor-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="form-modal program-editor program-editor--fullscreen" role="dialog" aria-modal="true" aria-label={initialProgram ? "Edit program" : "Create a program"}>
       <div className="form-modal-head">
@@ -2811,35 +2807,36 @@ function ProgramModal({ initialProgram, onClose, onCreate }: { initialProgram: P
           const dayIndex = programDays.indexOf(date);
           return <button type="button" key={date} className={`day-tab presentation-day-tab${activeFlowDate === date ? " day-tab--active" : ""}`} aria-pressed={activeFlowDate === date} onClick={() => setSelectedFlowDate(date)}><span>{dayIndex >= 0 ? `DAY ${String(dayIndex + 1).padStart(2, "0")}` : "OTHER DAY"}</span><small>{displayDate(date, { month: "short", day: "numeric" })}</small></button>;
         })}</div><button type="button" className="day-arrow" aria-label="Next program day" disabled={selectedFlowIndex >= flowDays.length - 1} onClick={() => setSelectedFlowDate(flowDays[Math.min(flowDays.length - 1, selectedFlowIndex + 1)])}><ChevronRight size={19} /></button></div></div>}
-        <div className="session-edit-list">{visibleSessionRows.map(({ item, index }) => <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}>
+        <div className="session-edit-list">{visibleSessionRows.map(({ item, index }) => {
+          const people = responsiblePeople(item.responsible);
+          const peopleAndTopicRows = Math.max(people.length, item.topics?.length ?? 0, 1);
+          return <section className="session-edit-row" key={index} aria-label={`Session ${index + 1}`}>
           <div className="session-edit-main"><span className="session-edit-num">{String(index + 1).padStart(2, "0")}</span>
             <label className="session-edit-field session-edit-field--date"><span>Session date</span><input autoComplete="off" type="date" value={item.date} onChange={(event) => updateSession(index, { date: event.target.value })} required /></label>
             <label className="session-edit-field session-edit-field--start"><span>Start time</span><input autoComplete="off" lang="en-US" type="time" aria-label="Start time (HH:MM AM/PM)" value={sessionTimeRange(item).startTime} onChange={(event) => updateSession(index, { startTime: event.target.value })} required /></label>
             <label className="session-edit-field session-edit-field--end"><span>End time</span><input autoComplete="off" lang="en-US" type="time" aria-label="End time (HH:MM AM/PM)" value={sessionTimeRange(item).endTime} onChange={(event) => updateSession(index, { endTime: event.target.value })} required /></label>
             <label className="session-edit-field session-edit-field--title"><span>Session title</span><input autoComplete="off" placeholder="e.g. Opening ceremony" value={item.session} onChange={(event) => updateSession(index, { session: event.target.value })} required /></label>
+            <span className="session-edit-session-options">
+              <label className="all-participants-toggle"><input type="checkbox" aria-label="All Participants" checked={Boolean(item.allParticipants)} onChange={(event) => updateSession(index, { allParticipants: event.target.checked, responsibleNotApplicable: false })} /><span>All Participants</span></label>
+              <label className="all-participants-toggle"><input type="checkbox" aria-label="Responsible Not Applicable" checked={Boolean(item.responsibleNotApplicable)} onChange={(event) => updateSession(index, { responsibleNotApplicable: event.target.checked, allParticipants: false })} /><span>Responsible Not Applicable</span></label>
+            </span>
             <button type="button" aria-label="Remove session" className="remove-session" disabled={sessions.length === 1} onClick={() => setSessions((current) => current.filter((_, i) => i !== index))}><X size={15} /></button>
           </div>
-          <div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>
-            <label className="session-topic-toggle"><input type="checkbox" aria-label="Add topics to this session" checked={Boolean(item.topics?.length)} onChange={(event) => toggleSessionTopics(index, event.target.checked)} /><span>Topic</span></label>
-            {Boolean(item.topics?.length) && <div className="session-edit-topic-fields">
-              <div className="session-edit-topics-head"><span>Topics for this session</span><button type="button" className="text-action" onClick={() => addSessionTopic(index)}><Plus size={13} /> Add topic</button></div>
-              <div className="session-edit-topic-list">{item.topics!.map((topic, topicIndex) => <div className="session-edit-topic-row" key={topicIndex}>
-                <input autoComplete="off" aria-label={`Topic ${topicIndex + 1} for session ${index + 1}`} placeholder="Enter a topic" value={topic} onChange={(event) => updateSessionTopic(index, topicIndex, event.target.value)} />
-                <button type="button" className="remove-session" aria-label={`Remove topic ${topicIndex + 1} from session ${index + 1}`} disabled={(item.topics?.length ?? 0) <= 1} onClick={() => removeSessionTopic(index, topicIndex)}><X size={14} /></button>
-              </div>)}</div>
-            </div>}
-            {responsiblePeople(item.responsible).map((person, personIndex) => <div className="responsible-edit-row" key={personIndex}>
-              <input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} />
-              <input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} />
-              <input autoComplete="off" aria-label="Responsible office" placeholder="Office" value={person.office} disabled={Boolean(item.allParticipants || item.responsibleNotApplicable)} onChange={(event) => updateResponsible(index, personIndex, "office", event.target.value)} />
-              <span className="all-participants-slot">{personIndex === 0 ? <span className="responsible-options">
-                <label className="all-participants-toggle"><input type="checkbox" aria-label="All Participants" checked={Boolean(item.allParticipants)} onChange={(event) => updateSession(index, { allParticipants: event.target.checked, responsibleNotApplicable: false })} /><span>All Participants</span></label>
-                <label className="all-participants-toggle"><input type="checkbox" aria-label="Responsible Not Applicable" checked={Boolean(item.responsibleNotApplicable)} onChange={(event) => updateSession(index, { responsibleNotApplicable: event.target.checked, allParticipants: false })} /><span>Responsible Not Applicable</span></label>
-              </span> : null}</span>
-              <button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" disabled={Boolean(item.allParticipants || item.responsibleNotApplicable) || responsiblePeople(item.responsible).length <= 1} onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button>
-            </div>)}
-          </div>
-        </section>)}{activeFlowDate && visibleSessionRows.length === 0 && <div className="session-edit-empty">No sessions for {displayDate(activeFlowDate, { month: "long", day: "numeric", year: "numeric" })} yet. Use <strong>Add a session</strong> to add one to this day.</div>}</div>
+          {!item.allParticipants && !item.responsibleNotApplicable && <div className="session-edit-responsibles"><div className="session-edit-responsibles-head"><span>Responsible people</span><button type="button" className="text-action" onClick={() => addResponsible(index)}><Plus size={13} /> Add responsible</button></div>
+            <div className="responsible-edit-columns"><span>Responsible</span><span>Designation</span><span>Office</span><span>Topic</span></div>
+            {Array.from({ length: peopleAndTopicRows }, (_, personIndex) => {
+              const person = people[personIndex] ?? emptyResponsiblePerson();
+              return <div className="responsible-edit-row" key={personIndex}>
+              <input autoComplete="off" aria-label="Responsible name" placeholder="Responsible" value={person.name} onChange={(event) => updateResponsible(index, personIndex, "name", event.target.value)} />
+              <input autoComplete="off" aria-label="Responsible designation" placeholder="Designation" value={person.designation} onChange={(event) => updateResponsible(index, personIndex, "designation", event.target.value)} />
+              <input autoComplete="off" aria-label="Responsible office" placeholder="Office" value={person.office} onChange={(event) => updateResponsible(index, personIndex, "office", event.target.value)} />
+              <input autoComplete="off" aria-label={`Topic for row ${personIndex + 1}`} placeholder="Topic" value={item.topics?.[personIndex] ?? ""} onChange={(event) => updateSessionTopic(index, personIndex, event.target.value)} />
+              <button type="button" aria-label={`Remove responsible person ${personIndex + 1}`} className="remove-session" disabled={personIndex >= people.length || people.length <= 1} onClick={() => removeResponsible(index, personIndex)}><X size={14} /></button>
+            </div>;
+            })}
+          </div>}
+        </section>;
+        })}{activeFlowDate && visibleSessionRows.length === 0 && <div className="session-edit-empty">No sessions for {displayDate(activeFlowDate, { month: "long", day: "numeric", year: "numeric" })} yet. Use <strong>Add a session</strong> to add one to this day.</div>}</div>
         <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" className="button button--olive">{initialProgram ? "Save changes" : "Publish program"} <ArrowRight size={16} /></button></div>
       </form>
     </div>

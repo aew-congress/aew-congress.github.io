@@ -1232,7 +1232,6 @@ export default function Experience() {
     const timeStart = String(form.get("timeStart") ?? "").trim();
     const mechanicsHtml = sanitizeContestMechanicsHtml(String(form.get("mechanicsHtml") ?? ""));
     let criteria: Array<{ criteria: string; description: string; weight: number }>;
-    let teams: ContestTeam[];
     try {
       const rows = JSON.parse(String(form.get("criteriaRows"))) as Array<{ criteria?: unknown; description?: unknown; weight?: unknown }>;
       criteria = rows.map((row) => ({
@@ -1243,12 +1242,6 @@ export default function Experience() {
     } catch {
       criteria = [];
     }
-    try {
-      const rows = JSON.parse(String(form.get("contestTeamsJson") ?? "[]")) as Array<{ id?: unknown; name?: unknown }>;
-      teams = rows.map((row) => ({ id: String(row.id ?? "").trim() || createContestTeamId(), name: String(row.name ?? "").trim().replace(/\s+/g, " ") })).filter((team) => team.name);
-    } catch {
-      teams = [];
-    }
     if (!contestDate || !timeStart) {
       setToast({ kind: "error", text: "Choose a contest date and start time." });
       return;
@@ -1257,18 +1250,13 @@ export default function Experience() {
       setToast({ kind: "error", text: "Complete every criteria row and enter a non-negative weight for each." });
       return;
     }
-    if (teams.length > 50) {
-      setToast({ kind: "error", text: "A contest can have up to 50 judging teams." });
-      return;
-    }
     const contestId = `${program.id}_${encodeURIComponent(contest.toLowerCase())}`;
     try {
       const adminUser = await getVerifiedAdmin();
       if (editingMechanics) {
         const joins = await getDocs(query(collection(db, "contestJoins"), where("contestId", "==", editingMechanics.id)));
-        const teamSettings = teams.length || Array.isArray(editingMechanics.teams) ? { teams } : {};
         const updates = [
-          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, ...teamSettings, mechanicsHtml, updatedAt: serverTimestamp() } },
+          { collectionName: "contestMechanics", id: editingMechanics.id, data: { programId: program.id, eventTitle: program.eventTitle, dateFrom: program.dateFrom, dateTo: program.dateTo, venue: program.venue, contest, contestDate, timeStart, criteria, mechanicsHtml, updatedAt: serverTimestamp() } },
           ...joins.docs.map((entry) => ({ collectionName: "contestJoins", id: entry.id, data: { programId: program.id, contest, updatedAt: serverTimestamp() } })),
         ];
         for (let start = 0; start < updates.length; start += 450) {
@@ -1280,20 +1268,6 @@ export default function Experience() {
       } else {
         const programMechanics = await getDocs(query(collection(db, "contestMechanics"), where("programId", "==", program.id)));
         const matching = programMechanics.docs.find((entry) => String(entry.data().contest ?? "").trim().toLowerCase() === contest.toLowerCase());
-        if (matching && teams.length) {
-          const existingTeams = Array.isArray(matching.data().teams) ? matching.data().teams as ContestTeam[] : [];
-          const teamNames = new Set(existingTeams.map((team) => team.name.trim().toLowerCase()));
-          const resultingTeamCount = existingTeams.length + teams.filter((team) => {
-            const key = team.name.toLowerCase();
-            if (teamNames.has(key)) return false;
-            teamNames.add(key);
-            return true;
-          }).length;
-          if (resultingTeamCount > 50) {
-            setToast({ kind: "error", text: "A contest can have up to 50 judging teams." });
-            return;
-          }
-        }
         const mechanicsRef = doc(db, "contestMechanics", matching?.id ?? contestId);
         await runTransaction(db, async (transaction) => {
           const existing = await transaction.get(mechanicsRef);
@@ -1301,7 +1275,6 @@ export default function Experience() {
             const current = existing.data() as ContestMechanics;
             transaction.update(mechanicsRef, {
               criteria: [...(Array.isArray(current.criteria) ? current.criteria : []), ...criteria],
-              ...(teams.length ? { teams: [...(Array.isArray(current.teams) ? current.teams : []), ...teams.filter((team) => !(current.teams ?? []).some((existing) => existing.name.trim().toLowerCase() === team.name.toLowerCase()))] } : {}),
               mechanicsHtml: mechanicsHtml || current.mechanicsHtml || "",
               contestDate,
               timeStart,
@@ -1318,7 +1291,6 @@ export default function Experience() {
               contestDate,
               timeStart,
               criteria,
-              ...(teams.length ? { teams } : {}),
               mechanicsHtml,
               createdAt: serverTimestamp(),
               createdBy: adminUser.uid,
@@ -1330,6 +1302,30 @@ export default function Experience() {
       setContestMechanicsModal(false);
       setEditingMechanics(null);
     } catch (error) { showError(error); }
+  }
+
+  async function saveContestTeams(contest: ContestMechanics, enteredTeams: ContestTeam[]) {
+    if (!user || !isAdmin) {
+      setToast({ kind: "error", text: "Sign in with a verified admin account to manage judging teams." });
+      return false;
+    }
+    const teams = enteredTeams.map((team) => ({
+      id: String(team.id ?? "").trim() || createContestTeamId(),
+      name: String(team.name ?? "").trim().replace(/\s+/g, " "),
+    })).filter((team) => team.name);
+    if (teams.length > 50) {
+      setToast({ kind: "error", text: "A contest can have up to 50 judging teams." });
+      return false;
+    }
+    try {
+      await getVerifiedAdmin();
+      await updateDoc(doc(db, "contestMechanics", contest.id), { teams, updatedAt: serverTimestamp() });
+      setToast({ kind: "success", text: `Judging teams for ${contest.contest} updated.` });
+      return true;
+    } catch (error) {
+      showError(error);
+      return false;
+    }
   }
 
   async function joinContest(contest: ContestMechanics) {
@@ -1498,7 +1494,7 @@ export default function Experience() {
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} canViewRanking={isSuperadmin} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} />
+          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} canViewRanking={isSuperadmin} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onSaveTeams={saveContestTeams} />
         ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
           <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
@@ -2088,11 +2084,49 @@ function contestWeightTotal(criteria: ContestMechanics["criteria"] = []) {
   return criteria.reduce((total, item) => total + (Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0), 0);
 }
 
-function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, canViewRanking, onAdd, onEdit, onDelete }: {
-  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; canViewRanking: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void;
+function ContestTeamsModal({ contest, onClose, onSave }: { contest: ContestMechanics; onClose: () => void; onSave: (contest: ContestMechanics, teams: ContestTeam[]) => Promise<boolean> }) {
+  const [teams, setTeams] = useState<ContestTeam[]>(() => Array.isArray(contest.teams) && contest.teams.length
+    ? contest.teams.map((team, index) => ({ id: String(team.id ?? "").trim() || `team-${index + 1}`, name: String(team.name ?? "") }))
+    : [{ id: "new-team-1", name: "" }]);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const updateTeam = (id: string, name: string) => setTeams((current) => current.map((team) => team.id === id ? { ...team, name } : team));
+
+  async function saveTeams(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const savedTeams = teams.map((team) => ({ id: team.id, name: team.name.trim().replace(/\s+/g, " ") })).filter((team) => team.name);
+    if (savedTeams.length > 50) { setNotice("A contest can have up to 50 judging teams."); return; }
+    setSaving(true);
+    setNotice("");
+    try {
+      const saved = await onSave(contest, savedTeams);
+      if (saved) onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+    <section className="form-modal contest-teams-modal" role="dialog" aria-modal="true" aria-labelledby="contest-teams-title">
+      <div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2 id="contest-teams-title">Teams for <i>Judging</i><span>.</span></h2><p>{contest.eventTitle} Â· {contest.contest}</p></div><button type="button" className="modal-close modal-close--inline" onClick={() => !saving && onClose()} aria-label="Close judging teams"><X size={19} /></button></div>
+      <form onSubmit={saveTeams}>
+        <div className="contest-team-editor">
+          <div className="criteria-editor-heading"><div><span>JUDGING TEAMS</span><small>These names will appear on judges’ score sheets for this contest.</small></div><button type="button" className="text-action" disabled={saving || teams.length >= 50} onClick={() => setTeams((current) => [...current, { id: createContestTeamId(), name: "" }])}><Plus size={15} /> Add Team</button></div>
+          {teams.length ? <div className="contest-team-table-wrap"><table className="contest-team-table"><thead><tr><th scope="col">Team</th><th scope="col" aria-label="Actions" /></tr></thead><tbody>{teams.map((team, index) => <tr key={team.id}><td><input aria-label={`Judging team ${index + 1}`} value={team.name} onChange={(event) => updateTeam(team.id, event.target.value)} placeholder="Enter a team name" disabled={saving} /></td><td><button type="button" className="criteria-remove" aria-label={`Remove judging team ${index + 1}`} disabled={saving} onClick={() => setTeams((current) => current.filter((entry) => entry.id !== team.id))}><X size={16} /></button></td></tr>)}</tbody></table></div> : <p className="contest-team-empty">No judging teams have been added.</p>}
+          {notice && <p className="form-hint" role="alert">{notice}</p>}
+        </div>
+        <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="button button--olive" disabled={saving}>{saving ? "Saving…" : "Save teams"} <ArrowRight size={16} /></button></div>
+      </form>
+    </section>
+  </div>;
+}
+
+function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, canViewRanking, onAdd, onEdit, onDelete, onSaveTeams }: {
+  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; canViewRanking: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void; onSaveTeams: (contest: ContestMechanics, teams: ContestTeam[]) => Promise<boolean>;
 }) {
   const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
   const [viewingRankings, setViewingRankings] = useState<ContestMechanics | null>(null);
+  const [managingTeams, setManagingTeams] = useState<ContestMechanics | null>(null);
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const filteredMechanics = (selectedProgramId ? mechanics.filter((item) => item.programId === selectedProgramId) : mechanics).slice().sort(compareContestSchedule);
   const profilesByUid = new Map(profiles.map((profile) => [profile.uid, profile]));
@@ -2110,7 +2144,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
         <div className="approval-table-wrap"><table className="approval-table contest-table contest-table--directory"><thead><tr><th>CONTEST</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {filteredMechanics.map((item) => {
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
-            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => { setViewingRankings(null); setViewingContestants(item); }}><Eye size={15} />View</button>{canViewRanking && <button className="contest-view ranking-view" aria-label={`View ranking for ${item.contest}`} onClick={() => { setViewingContestants(null); setViewingRankings(item); }}>View Ranking</button>}</div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
+            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => { setViewingRankings(null); setViewingContestants(item); }}><Eye size={15} />View</button><button className="contest-view teams-manage-view" aria-label={`Manage judging teams for ${item.contest}`} onClick={() => setManagingTeams(item)}><UsersRound size={15} />Teams for Judging</button>{canViewRanking && <button className="contest-view ranking-view" aria-label={`View ranking for ${item.contest}`} onClick={() => { setViewingContestants(null); setViewingRankings(item); }}>View Ranking</button>}</div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
           {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest criteria…" : selectedProgramId ? "No contest criteria for this program" : "No contest criteria yet"}</strong><span>{loading ? "Saved contest criteria will appear here." : selectedProgramId ? "Add contest criteria for this program's contests to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest criteria."}</span></td></tr>}
         </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest criteria.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
@@ -2122,6 +2156,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
       return <tr key={join.id}><td><strong className="table-primary">{profile ? fullName(profile) || "Member" : "Member profile unavailable"}</strong></td><td>{profile?.designation || "—"}</td><td>{profile?.office || "—"}</td><td>{profile?.contactNo || "—"}</td><td><div className="contestant-confirm-cell">{qualified ? <span className="qualified-contestant">Qualified Contestant</span> : <><span className="table-muted">Joined</span><button className="button button--soft contestant-confirm-button" disabled={Boolean(confirmingJoinId)} onClick={() => onConfirmContestant(join)}>{confirmingJoinId === join.id ? "Confirming…" : "Confirm"}</button></>}</div></td></tr>;
     }) : <tr><td colSpan={5} className="empty-table"><UsersRound size={20} /><strong>No contestants yet</strong><span>Members who join this contest will appear here.</span></td></tr>}</tbody></table></div><div className="form-modal-actions"><button className="button button--soft" disabled={Boolean(confirmingJoinId)} onClick={() => setViewingContestants(null)}>Close</button></div></section></div>}
     {viewingRankings && <ContestRankingsModal key={viewingRankings.id} contest={viewingRankings} onClose={() => setViewingRankings(null)} />}
+    {managingTeams && <ContestTeamsModal key={managingTeams.id} contest={managingTeams} onClose={() => setManagingTeams(null)} onSave={onSaveTeams} />}
   </>;
 }
 
@@ -2523,14 +2558,10 @@ function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; on
 
 function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
-  const [contestTeams, setContestTeams] = useState<ContestTeam[]>(() => initialMechanics?.teams?.length
-    ? initialMechanics.teams.map((team, index) => ({ id: String(team.id ?? "").trim() || `team-${index + 1}`, name: String(team.name ?? "") }))
-    : [{ id: "new-team-1", name: "" }]);
   const [mechanicsHtml, setMechanicsHtml] = useState(initialMechanics?.mechanicsHtml ?? "");
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
-  const updateContestTeam = (id: string, name: string) => setContestTeams((current) => current.map((team) => team.id === id ? { ...team, name } : team));
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest criteria" : "Add contest criteria"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest criteria" : "Add contest criteria"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <div className="contest-schedule-fields">
@@ -2540,17 +2571,12 @@ function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }
       <Field label="Time Start"><input type="time" name="timeStart" defaultValue={initialMechanics?.timeStart ?? ""} required /></Field>
     </div>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />
-    <input type="hidden" name="contestTeamsJson" value={JSON.stringify(contestTeams)} readOnly />
     <div className="criteria-editor-heading"><span>CRITERIA & SCORING</span><button type="button" className="text-action" onClick={() => setCriteriaRows((current) => [...current, { criteria: "", description: "", weight: "" }])}><Plus size={15} /> Add Another Criteria</button></div>
     <div className="criteria-editor-list"><table className="criteria-editor-table"><thead><tr><th scope="col" aria-label="Row number" /><th scope="col">Criteria</th><th scope="col">Description</th><th scope="col">Weight (%)</th><th scope="col" aria-label="Actions" /></tr></thead><tbody>{criteriaRows.map((row, index) => <tr key={index}><td className="criteria-editor-number">{String(index + 1).padStart(2, "0")}</td><td><input aria-label={`Criteria ${index + 1}`} value={row.criteria} onChange={(event) => updateCriteria(index, "criteria", event.target.value)} placeholder="e.g. Innovation and relevance" required /></td><td><textarea aria-label={`Description for criteria ${index + 1}`} value={row.description} onChange={(event) => updateCriteria(index, "description", event.target.value)} placeholder="Describe what judges should look for" rows={2} required /></td><td><input aria-label={`Weight for criteria ${index + 1}`} type="number" min="0" step="0.01" value={row.weight} onChange={(event) => updateCriteria(index, "weight", event.target.value)} placeholder="e.g. 25" required /></td><td><button type="button" className="criteria-remove" disabled={criteriaRows.length === 1} aria-label={`Remove criteria ${index + 1}`} onClick={() => setCriteriaRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button></td></tr>)}</tbody></table></div>
     <input type="hidden" name="mechanicsHtml" value={mechanicsHtml} readOnly />
     <section className="contest-mechanics-rich-text-section">
       <div className="criteria-editor-heading"><div><span>CONTEST MECHANICS</span><small>Optional rules, instructions, and details for contestants.</small></div></div>
       <ContestMechanicsRichTextEditor value={mechanicsHtml} onChange={setMechanicsHtml} />
-    </section>
-    <section className="contest-team-editor">
-      <div className="criteria-editor-heading"><div><span>TEAMS FOR JUDGING</span><small>These teams will appear on judges’ score sheets for this contest.</small></div><button type="button" className="text-action" disabled={contestTeams.length >= 50} onClick={() => setContestTeams((current) => [...current, { id: createContestTeamId(), name: "" }])}><Plus size={15} /> Add Team</button></div>
-      {contestTeams.length ? <div className="contest-team-table-wrap"><table className="contest-team-table"><thead><tr><th scope="col">Team</th><th scope="col" aria-label="Actions" /></tr></thead><tbody>{contestTeams.map((team, index) => <tr key={team.id}><td><input aria-label={`Judging team ${index + 1}`} value={team.name} onChange={(event) => updateContestTeam(team.id, event.target.value)} placeholder="Enter a team name" /></td><td><button type="button" className="criteria-remove" aria-label={`Remove judging team ${index + 1}`} onClick={() => setContestTeams((current) => current.filter((entry) => entry.id !== team.id))}><X size={16} /></button></td></tr>)}</tbody></table></div> : <p className="contest-team-empty">No judging teams have been added.</p>}
     </section>
     {programs.length === 0 && <p className="form-hint">Publish a program before adding contest criteria.</p>}
     <div className="form-modal-actions"><button type="button" className="button button--soft" onClick={onClose}>Cancel</button><button type="submit" disabled={programs.length === 0} className="button button--olive">{initialMechanics ? "Save changes" : "Save criteria"} <ArrowRight size={16} /></button></div>

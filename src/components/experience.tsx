@@ -142,6 +142,11 @@ function sessionPeriodLabel(item: ProgramSession) {
   return "EVENING SESSION";
 }
 
+function timeInMinutes(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
 function responsiblePeople(value: ProgramSession["responsible"]): ResponsiblePerson[] {
   if (Array.isArray(value)) return value.map((person) => ({
     name: String(person?.name ?? ""),
@@ -360,31 +365,37 @@ export default function Experience() {
     for (const d = new Date(first); d <= last && values.length < 31; d.setDate(d.getDate() + 1)) values.push(d.toISOString().slice(0, 10));
     return values.length ? values : [selectedProgram.dateFrom];
   }, [selectedProgram]);
-  const filteredSessions = useMemo(() => {
+  const daySessions = useMemo(() => {
     if (!selectedProgram) return [];
     const selectedDate = days[selectedDay];
-    return selectedProgram.flow.filter((item) => {
-      const matchesDay = item.date === selectedDate;
+    return selectedProgram.flow.filter((item) => item.date === selectedDate);
+  }, [days, selectedDay, selectedProgram]);
+  const filteredSessions = useMemo(() => {
+    return daySessions.filter((item) => {
       const needle = search.trim().toLowerCase();
       const responsibleSearch = item.allParticipants ? "All Participants" : item.responsibleNotApplicable ? "" : responsibleSearchText(item.responsible);
       const matchesSearch = !needle || `${item.session} ${responsibleSearch}`.toLowerCase().includes(needle);
-      return matchesDay && matchesSearch;
+      return matchesSearch;
     }).sort((a, b) => {
       const aTime = sessionTimeRange(a);
       const bTime = sessionTimeRange(b);
       return (aTime.startTime || a.time || "").localeCompare(bTime.startTime || b.time || "")
         || aTime.endTime.localeCompare(bTime.endTime);
     });
-  }, [days, selectedDay, selectedProgram, search]);
+  }, [daySessions, search]);
 
   const scheduleRows = useMemo(() => {
     const rows: { item: ProgramSession; timeRowSpan: number; timeGroup: number; period: string; periodLabel: string }[] = [];
+    const timedSessions = daySessions.map((item) => sessionTimeRange(item)).filter((range) => range.startTime && range.endTime);
+    const firstStart = timedSessions.length ? Math.min(...timedSessions.map((range) => timeInMinutes(range.startTime))) : Infinity;
+    const lastEnd = timedSessions.length ? Math.max(...timedSessions.map((range) => timeInMinutes(range.endTime))) : -Infinity;
+    const isWholeDay = firstStart <= 5 * 60 + 30 && lastEnd >= 17 * 60 + 30;
     let timeGroup = 0;
     let previousPeriod = "";
     for (let index = 0; index < filteredSessions.length;) {
       const item = filteredSessions[index];
       const time = sessionTimeRange(item);
-      const period = sessionPeriodLabel(item);
+      const period = isWholeDay ? "WHOLE DAY SESSION" : sessionPeriodLabel(item);
       const periodLabel = period && period !== previousPeriod ? period : "";
       if (period) previousPeriod = period;
       let groupEnd = index + 1;
@@ -404,7 +415,7 @@ export default function Experience() {
       timeGroup += 1;
     }
     return rows;
-  }, [filteredSessions]);
+  }, [daySessions, filteredSessions]);
 
   useEffect(() => {
     const stopPrograms = onSnapshot(query(collection(db, "programs"), orderBy("dateFrom", "asc")), (snapshot) => {

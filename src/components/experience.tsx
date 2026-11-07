@@ -389,7 +389,7 @@ export default function Experience() {
     const timedSessions = daySessions.map((item) => sessionTimeRange(item)).filter((range) => range.startTime && range.endTime);
     const firstStart = timedSessions.length ? Math.min(...timedSessions.map((range) => timeInMinutes(range.startTime))) : Infinity;
     const lastEnd = timedSessions.length ? Math.max(...timedSessions.map((range) => timeInMinutes(range.endTime))) : -Infinity;
-    const isWholeDay = firstStart <= 5 * 60 + 30 && lastEnd >= 17 * 60 + 30;
+    const isWholeDay = firstStart <= 8 * 60 + 30 && lastEnd >= 17 * 60 - 30;
     let timeGroup = 0;
     let previousPeriod = "";
     for (let index = 0; index < filteredSessions.length;) {

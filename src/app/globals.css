@@ -373,6 +373,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .contest-panel + .contest-panel, .contest-mechanics-detail { margin-top: 22px; }
 .contest-panel-heading { align-items: center; }
 .contest-member-filter { width: min(260px, 100%); }
+.contest-mobile-label { display: none; }
 .contest-panel-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .contest-program-filter { display: grid; gap: 4px; min-width: 220px; color: #929a86; font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .contest-program-filter select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #e2e6da; border-radius: 8px; outline: 0; background: #fff; color: #576048; font-size: 12px; font-weight: 600; letter-spacing: normal; text-transform: none; }
@@ -494,6 +495,26 @@ img { -webkit-user-drag: none; user-select: none; }
 .judge-score-notice--saved { color: #59752c; }
 @media (max-width: 760px) {
   .contest-row-actions { justify-content: flex-start; }
+  .contest-member-table-wrap { overflow: visible; }
+  .approval-table.contest-table--member { display: block; width: 100%; min-width: 0; table-layout: fixed; }
+  .contest-table--member thead { display: none; }
+  .contest-table--member tbody { display: grid; gap: 9px; }
+  .contest-table--member tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "contest join" "schedule schedule" "criteria criteria"; align-items: start; gap: 9px 12px; padding: 12px; border: 1px solid #edf0e9; border-radius: 10px; background: #fff; }
+  .contest-table--member tbody tr > td { display: block; max-width: none; padding: 0 !important; border: 0; }
+  .contest-table--member tbody tr > td:nth-child(n) { min-width: 0; white-space: normal; }
+  .contest-table--member tbody tr > td:nth-child(1) { grid-area: schedule; }
+  .contest-table--member tbody tr > td:nth-child(2) { grid-area: contest; }
+  .contest-table--member tbody tr > td:nth-child(3) { grid-area: join; justify-self: end; }
+  .contest-table--member tbody tr > td:nth-child(4) { grid-area: criteria; }
+  .contest-table--member .contest-mobile-label { display: block; margin-bottom: 4px; color: #979d91; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+  .contest-table--member .table-primary { overflow-wrap: anywhere; line-height: 1.4; }
+  .contest-table--member .contest-join { max-width: 100%; min-height: 33px; padding-inline: 8px; font-size: 11px; white-space: normal; }
+  .contest-table--member .contest-join--qualified { line-height: 1.25; }
+  .contest-table--member .contest-row-actions { flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
+  .contest-table--member .contest-view { max-width: 100%; padding-inline: 4px; white-space: normal; }
+  .contest-table--member .contest-judge { max-width: 100%; padding-inline: 8px; white-space: normal; }
+  .contest-table--member tbody tr.contest-table-empty-row { display: block; padding: 0; border: 0; background: transparent; }
+  .contest-table--member tbody tr.contest-table-empty-row > td.empty-table { display: flex; min-height: 150px; flex-direction: column; align-items: center; justify-content: center; padding: 18px 12px !important; border: 1px dashed #d9dfce; border-radius: 10px; white-space: normal; }
   .judge-score-modal { padding: 20px 16px; }
   .judge-score-modal .form-modal-head { align-items: flex-start; flex-direction: column; gap: 12px; }
   .judge-score-actions { width: 100%; justify-content: flex-end; }

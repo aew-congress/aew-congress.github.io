@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, runTransaction, serverTimestamp, updateDoc } from "firebase/firestore";
-import { ArrowRight, Check, Search, X } from "lucide-react";
+import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { ArrowRight, Check, Eye, EyeOff, Search, X } from "lucide-react";
 import { db, Program, ProgramEvaluation } from "@/lib/firebase";
 
 const clientTypes = ["Lungsuranon (citizen)", "Negasyo", "Gobyerno (empleyado o sa ubang ahensya)"];
@@ -171,55 +171,58 @@ export function ProgramEvaluationModal({ program, respondentUid, respondentKind,
     setSaving(true);
     setNotice("");
     const responseRef = doc(db, "programEvaluations", program.id, "responses", respondentUid);
+    const clientType = value(form, "clientType");
+    const cc1 = value(form, "cc1");
+    const data: Omit<ProgramEvaluation, "id"> = {
+      programId: program.id,
+      programTitle: program.eventTitle,
+      respondentUid,
+      respondentKind,
+      name: fullRespondentName(form, beneficiaryType),
+      clientType,
+      beneficiaryType,
+      beneficiaryCategory,
+      beneficiaryOther: value(form, "beneficiaryOther"),
+      registrationId: value(form, "registrationId"),
+      contactNo: `+63 9${value(form, "contactNo")}`,
+      groupName: value(form, "groupName"),
+      firstName: value(form, "firstName"),
+      middleName: value(form, "middleName"),
+      lastName: value(form, "lastName"),
+      suffix: value(form, "suffix"),
+      region: value(form, "region"),
+      province: value(form, "province"),
+      cityMunicipality: value(form, "cityMunicipality"),
+      barangay: value(form, "barangay"),
+      street: value(form, "street"),
+      sex: value(form, "sex"),
+      birthdate: value(form, "birthdate"),
+      membership: value(form, "membership"),
+      interventions,
+      interventionOtherQuantity: value(form, "interventionOtherQuantity"),
+      interventionOtherDetail: value(form, "interventionOtherDetail"),
+      cc1,
+      cc2: cc1.startsWith("4.") ? "" : value(form, "cc2"),
+      cc3: cc1.startsWith("4.") ? "" : value(form, "cc3"),
+      overallSatisfaction: value(form, "overallSatisfaction"),
+      qualityScores: qualityQuestions.map((_, index) => value(form, `sqd${index + 1}`)),
+      deliveryScore: value(form, "tdd1"),
+      suggestions: value(form, "suggestions"),
+      caDistributed: false,
+      submittedAt: serverTimestamp(),
+    };
     try {
-      await runTransaction(db, async (transaction) => {
-        const existing = await transaction.get(responseRef);
-        if (existing.exists()) throw new Error("evaluation-already-submitted");
-        const clientType = value(form, "clientType");
-        const cc1 = value(form, "cc1");
-        const data: Omit<ProgramEvaluation, "id"> = {
-          programId: program.id,
-          programTitle: program.eventTitle,
-          respondentUid,
-          respondentKind,
-          name: fullRespondentName(form, beneficiaryType),
-          clientType,
-          beneficiaryType,
-          beneficiaryCategory,
-          beneficiaryOther: value(form, "beneficiaryOther"),
-          registrationId: value(form, "registrationId"),
-          contactNo: `+63 9${value(form, "contactNo")}`,
-          groupName: value(form, "groupName"),
-          firstName: value(form, "firstName"),
-          middleName: value(form, "middleName"),
-          lastName: value(form, "lastName"),
-          suffix: value(form, "suffix"),
-          region: value(form, "region"),
-          province: value(form, "province"),
-          cityMunicipality: value(form, "cityMunicipality"),
-          barangay: value(form, "barangay"),
-          street: value(form, "street"),
-          sex: value(form, "sex"),
-          birthdate: value(form, "birthdate"),
-          membership: value(form, "membership"),
-          interventions,
-          interventionOtherQuantity: value(form, "interventionOtherQuantity"),
-          interventionOtherDetail: value(form, "interventionOtherDetail"),
-          cc1,
-          cc2: cc1.startsWith("4.") ? "" : value(form, "cc2"),
-          cc3: cc1.startsWith("4.") ? "" : value(form, "cc3"),
-          overallSatisfaction: value(form, "overallSatisfaction"),
-          qualityScores: qualityQuestions.map((_, index) => value(form, `sqd${index + 1}`)),
-          deliveryScore: value(form, "tdd1"),
-          suggestions: value(form, "suggestions"),
-          caDistributed: false,
-          submittedAt: serverTimestamp(),
-        };
-        transaction.set(responseRef, data);
-      });
+      // The rules permit creates only and reject updates, so setDoc is an atomic,
+      // single-write create that still prevents duplicate submissions per account.
+      // A short randomized spread helps smooth a synchronized event-wide submit burst.
+      await new Promise((resolve) => window.setTimeout(resolve, Math.random() * 3000));
+      await setDoc(responseRef, data);
       onSubmitted();
     } catch (error) {
-      if ((error as { message?: string })?.message === "evaluation-already-submitted") {
+      // A competing tab or a retry after a lost network response may have already
+      // created this respondent's document. Check only after a failed create.
+      const existing = await getDoc(responseRef).catch(() => null);
+      if (existing?.exists()) {
         setNotice("Naa na kay na-submit nga evaluation alang niining programa.");
         onSubmitted();
       } else {
@@ -362,11 +365,17 @@ function displayBirthdate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-PH", { month: "2-digit", day: "2-digit", year: "numeric" });
 }
 
-export function ProgramEvaluationMasterlistModal({ program, onClose }: { program: Program; onClose: () => void }) {
+export function ProgramEvaluationMasterlistModal({ program, canManageVisibility, onToggleVisibility, onClose }: {
+  program: Program;
+  canManageVisibility: boolean;
+  onToggleVisibility: (program: Program) => Promise<void>;
+  onClose: () => void;
+}) {
   const [evaluations, setEvaluations] = useState<ProgramEvaluation[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [updatingId, setUpdatingId] = useState("");
+  const [visibilityUpdating, setVisibilityUpdating] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => onSnapshot(collection(db, "programEvaluations", program.id, "responses"), (snapshot) => {
     setEvaluations(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ProgramEvaluation)));
@@ -381,6 +390,13 @@ export function ProgramEvaluationMasterlistModal({ program, onClose }: { program
   }, [evaluations, search]);
   const distributedCount = evaluations.filter((evaluation) => evaluation.caDistributed === true).length;
 
+  async function toggleVisibility() {
+    if (visibilityUpdating) return;
+    setVisibilityUpdating(true);
+    try { await onToggleVisibility(program); }
+    finally { setVisibilityUpdating(false); }
+  }
+
   async function setDistributed(evaluation: ProgramEvaluation, caDistributed: boolean) {
     setUpdatingId(evaluation.id);
     setError("");
@@ -393,16 +409,16 @@ export function ProgramEvaluationMasterlistModal({ program, onClose }: { program
     }
   }
 
-  return <div className="modal-backdrop evaluation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !updatingId) onClose(); }}>
+  return <div className="modal-backdrop evaluation-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !updatingId && !visibilityUpdating) onClose(); }}>
     <section className="form-modal evaluation-masterlist-modal" role="dialog" aria-modal="true" aria-labelledby="evaluation-masterlist-title">
-      <div className="form-modal-head"><div><span className="eyebrow">CLIENT SATISFACTION MEASUREMENT</span><h2 id="evaluation-masterlist-title">Evaluation <i>masterlist</i><span>.</span></h2><p>{program.eventTitle}</p></div><button type="button" className="modal-close modal-close--inline" onClick={() => !updatingId && onClose()} aria-label="Close evaluation masterlist"><X size={19} /></button></div>
+      <div className="form-modal-head"><div className="evaluation-masterlist-heading"><span className="eyebrow">CLIENT SATISFACTION MEASUREMENT</span><h2 id="evaluation-masterlist-title">Evaluation <i>masterlist</i><span>.</span></h2><div className="evaluation-masterlist-program-row"><p>{program.eventTitle}</p>{canManageVisibility && <button type="button" className={`manage-action-button evaluation-visibility-toggle ${program.evaluationRevealed === true ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={program.evaluationRevealed === true ? "Unreveal the Evaluate button to guests and members" : "Reveal the Evaluate button to guests and members"} aria-pressed={program.evaluationRevealed === true} title={program.evaluationRevealed === true ? "Evaluate is visible — click to unreveal" : "Evaluate is hidden — click to reveal"} disabled={visibilityUpdating || Boolean(updatingId)} onClick={() => void toggleVisibility()}>{program.evaluationRevealed === true ? <Eye size={16} /> : <EyeOff size={16} />}</button>}</div></div><button type="button" className="modal-close modal-close--inline" onClick={() => !updatingId && !visibilityUpdating && onClose()} aria-label="Close evaluation masterlist"><X size={19} /></button></div>
       <div className="evaluation-masterlist-toolbar"><label className="evaluation-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pangalan, adlaw nga natawhan, o numero nga makontak" aria-label="Search evaluations by name, birthdate, or contact number" /></label><span className="evaluation-masterlist-counts">{visibleEvaluations.length} {visibleEvaluations.length === 1 ? "evaluation" : "evaluations"}{" | No. of CA Distributed: "}{distributedCount} out of {evaluations.length}</span></div>
       {error && <p className="evaluation-notice" role="alert">{error}</p>}
       <div className="evaluation-masterlist-table-wrap"><table className="approval-table evaluation-masterlist-table"><thead><tr><th>PANGALAN</th><th>ADLAW NGA NATAWHAN</th><th>NUMERO NGA MAKONTAK</th><th>CA DISTRIBUTED</th></tr></thead><tbody>
         {visibleEvaluations.map((evaluation) => <tr key={evaluation.id}><td><strong className="table-primary">{evaluation.name || "—"}</strong></td><td>{displayBirthdate(evaluation.birthdate)}</td><td>{evaluation.contactNo || "—"}</td><td><label className="ca-distributed-control"><input type="checkbox" aria-label={`CA Distributed for ${evaluation.name}`} checked={evaluation.caDistributed === true} disabled={updatingId === evaluation.id} onChange={(event) => void setDistributed(evaluation, event.target.checked)} /><span>{evaluation.caDistributed ? <Check size={13} /> : null}</span></label></td></tr>)}
         {!visibleEvaluations.length && <tr><td colSpan={4} className="empty-table"><Search size={19} /><strong>{loading ? "Nag-load sa mga evaluation…" : search ? "Walay nagpares nga evaluation" : "Wala pay evaluation"}</strong><span>{loading ? "Ang mga tubag makita dinhi human ma-submit." : search ? "Sulayi ang laing search term." : "Makita dinhi ang mga tubag alang niining programa."}</span></td></tr>}
       </tbody></table></div>
-      <div className="form-modal-actions"><button type="button" className="button button--soft" disabled={Boolean(updatingId)} onClick={onClose}>Close</button></div>
+      <div className="form-modal-actions"><button type="button" className="button button--soft" disabled={Boolean(updatingId) || visibilityUpdating} onClick={onClose}>Close</button></div>
     </section>
   </div>;
 }

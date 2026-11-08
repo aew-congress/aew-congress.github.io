@@ -49,6 +49,11 @@ service cloud.firestore {
       return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
 
+    function isGuestEvaluationSession(respondentUid) {
+      return request.auth == null
+        && respondentUid.matches('guest-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}');
+    }
+
     function isDesignatedJudge() {
       return verified()
         && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
@@ -179,13 +184,16 @@ service cloud.firestore {
 
     match /programEvaluations/{programId}/responses/{respondentUid} {
       allow get: if isAdmin()
-        || (signedIn() && respondentUid == request.auth.uid && (isRegularMember() || isEvaluationGuest()));
+        || (signedIn() && respondentUid == request.auth.uid && (isRegularMember() || isEvaluationGuest()))
+        || isGuestEvaluationSession(respondentUid);
       allow list: if isAdmin();
-      allow create: if respondentUid == request.auth.uid
-        && ((isRegularMember() && request.resource.data.respondentKind == 'member')
-          || (isEvaluationGuest() && request.resource.data.respondentKind == 'guest'))
+      allow create: if request.resource.data.respondentUid == respondentUid
         && request.resource.data.programId == programId
-        && request.resource.data.respondentUid == request.auth.uid
+        && ((signedIn()
+            && respondentUid == request.auth.uid
+            && ((isRegularMember() && request.resource.data.respondentKind == 'member')
+              || (isEvaluationGuest() && request.resource.data.respondentKind == 'guest')))
+          || (isGuestEvaluationSession(respondentUid) && request.resource.data.respondentKind == 'guest'))
         && request.resource.data.keys().hasAll([
           'programId', 'programTitle', 'respondentUid', 'respondentKind', 'name',
           'clientType', 'beneficiaryType', 'beneficiaryCategory', 'beneficiaryOther',
@@ -208,7 +216,7 @@ service cloud.firestore {
         ])
         && request.resource.data.caDistributed == false
         && request.resource.data.submittedAt == request.time
-        && exists(/databases/$(database)/documents/programs/$(programId));
+        && get(/databases/$(database)/documents/programs/$(programId)).data.evaluationRevealed == true;
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caDistributed'])
         && request.resource.data.caDistributed is bool;

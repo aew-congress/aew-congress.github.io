@@ -69,6 +69,8 @@ export type Program = {
   description?: string;
   /** Optional for programs saved before keynote topics were added. */
   keynoteTopics?: ProgramKeynoteTopic[];
+  /** Controls whether regular members and guests can access the evaluation form. */
+  evaluationRevealed?: boolean;
   flow: ProgramSession[];
 };
 

@@ -399,6 +399,12 @@ img { -webkit-user-drag: none; user-select: none; }
 .contest-teams-modal { width: min(660px, 100%); }
 .contest-rankings-modal { width: min(1120px, 100%); }
 .contest-rankings-modal .form-modal-head small { display: block; margin-top: 8px; color: #899082; font-size: 11px; line-height: 1.45; }
+.contest-ranking-heading { flex: 1; min-width: 0; }
+.contest-ranking-explainer { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
+.contest-ranking-explainer small { flex: 1; }
+.contest-rankings-print-button { flex: 0 0 auto; min-height: 34px; padding: 0 11px; font-size: 11px; }
+.contest-rankings-print-button svg { flex: 0 0 auto; }
+.contest-tabulation-print { display: none; }
 .ranking-summary { margin: 14px 0 9px; color: #858d7d; font-size: 11px; font-weight: 700; }
 .ranking-table-wrap { max-height: min(62vh, 560px); overflow: auto; border: 1px solid #e8ece2; border-radius: 10px; }
 .ranking-table { width: max-content; min-width: 100%; border-collapse: collapse; }
@@ -418,6 +424,10 @@ img { -webkit-user-drag: none; user-select: none; }
 .ranking-message--error { border-color: #f0d9d4; color: #915750; background: #fcf0ed; }
 .ranking-empty { display: grid; gap: 5px; text-align: center; }
 .ranking-empty strong { color: #3e4734; }
+@media (max-width: 560px) {
+  .contest-ranking-explainer { align-items: flex-start; flex-wrap: wrap; }
+  .contest-rankings-print-button { margin-top: 3px; }
+}
 .ranking-empty span { color: #899082; }
 .contestants-modal .form-modal-head { margin-bottom: 14px; }
 .contestants-table-wrap { overflow-x: auto; border: 1px solid #e9ece5; border-radius: 9px; }
@@ -888,6 +898,37 @@ img { -webkit-user-drag: none; user-select: none; }
   .site-shell--confirmed-attendees .confirmed-attendees-page .empty-table { height: auto !important; padding: 14mm 2mm !important; }
 }
 .manage-action-button--visible { color: #506b1d; background: #f0f6e4; border-color: #dfe9cd; }
+
+.contest-tabulation-page { display: none; }
+@page contest-tabulation { size: A4 portrait; margin: 0; }
+@media print {
+  html:has(.contest-tabulation-print), body:has(.contest-tabulation-print) { width: 210mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  body:has(.contest-tabulation-print) > *:not(.contest-tabulation-print) { display: none !important; }
+  .contest-tabulation-print { display: block !important; position: static !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; color: #111 !important; background: #fff !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .contest-tabulation-page { position: relative !important; display: block !important; width: 210mm !important; height: 297mm !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; background: #fff !important; page: contest-tabulation; break-after: page; page-break-after: always; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-page:last-child { break-after: auto; page-break-after: auto; }
+  .contest-tabulation-page-frame { position: absolute !important; inset: 0 !important; display: block !important; width: 210mm !important; height: 297mm !important; max-width: none !important; object-fit: fill !important; }
+  .contest-tabulation-page-content { position: absolute !important; inset: 44mm 17mm 34mm 18mm !important; z-index: 1 !important; color: #111 !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; line-height: 1.25 !important; }
+  .contest-tabulation-page-content h1 { margin: 0 0 6mm !important; color: #111 !important; text-align: center !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; font-weight: 700 !important; letter-spacing: .04em !important; }
+  .contest-tabulation-details { margin-bottom: 6mm !important; }
+  .contest-tabulation-details p { margin: 0 0 2mm !important; color: #111 !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; color: #111 !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-table th, .contest-tabulation-table td { height: 9mm !important; padding: 1.4mm 1mm !important; border: .35mm solid #111 !important; color: #111 !important; text-align: center !important; vertical-align: middle !important; overflow-wrap: anywhere !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-table th { font-weight: 700 !important; }
+  .contest-tabulation-table th:first-child, .contest-tabulation-table td:first-child { text-align: left !important; }
+  .contest-tabulation-signatures { margin-top: 11mm !important; color: #111 !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-certified { margin: 0 0 11mm !important; }
+  .contest-tabulation-certified strong, .contest-tabulation-noted > strong { font-weight: 400 !important; }
+  .contest-tabulation-judge-signatures { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 7mm !important; text-align: center !important; }
+  .contest-tabulation-judge-signatures > div { display: grid !important; justify-items: center !important; gap: 2mm !important; }
+  .contest-tabulation-judge-signatures strong { font-size: 12pt !important; }
+  .contest-tabulation-judge-signatures small { font-size: 12pt !important; }
+  .contest-tabulation-noted { margin-top: 12mm !important; }
+  .contest-tabulation-noted > strong { display: block !important; margin-bottom: 2mm !important; }
+  .contest-tabulation-noted-spacer { display: block !important; width: 65mm !important; min-height: 8mm !important; margin-bottom: 1mm !important; }
+  .contest-tabulation-noted p { display: grid !important; justify-items: start !important; gap: 1mm !important; width: 65mm !important; margin: 0 !important; text-align: left !important; }
+  .contest-tabulation-noted b, .contest-tabulation-noted span { font-size: 12pt !important; }
+}
 .manage-action-button--visible:hover { color: #405915; background: #e8f1d8; border-color: #cbd9b4; }
 .manage-action-button--hidden { color: #92988b; background: #f5f6f3; border-color: #e5e8df; }
 .manage-action-button--hidden:hover { color: #66705a; background: #edf0e9; border-color: #d7ddcc; }
@@ -1097,6 +1138,11 @@ img { -webkit-user-drag: none; user-select: none; }
 .evaluation-notice { margin: 10px 0; padding: 11px 13px; border: 1px solid #f0d9d4; border-radius: 8px; background: #fcf0ed; color: #915750; font-size: 12px; line-height: 1.5; }
 .evaluation-actions { position: sticky; bottom: -3px; z-index: 2; margin-top: 8px; padding: 12px 0 3px; border-top: 1px solid #e9ece5; background: #fff; }
 .evaluation-masterlist-modal { width: min(1100px, 100%); max-height: min(92dvh, 900px); display: flex; flex-direction: column; overflow: hidden; }
+.evaluation-masterlist-modal > .form-modal-head { gap: 14px; }
+.evaluation-masterlist-heading { flex: 1 1 auto; min-width: 0; }
+.evaluation-masterlist-program-row { display: flex; align-items: center; gap: 12px; }
+.evaluation-masterlist-program-row p { min-width: 0; overflow-wrap: anywhere; }
+.evaluation-visibility-toggle { margin-left: auto; flex: 0 0 auto; }
 .evaluation-masterlist-modal > .form-modal-head { flex: 0 0 auto; }
 .evaluation-masterlist-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; color: #899082; font-size: 11px; }
 .evaluation-search { min-width: 0; width: min(580px, 100%); height: 39px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #e2e6da; border-radius: 8px; background: #fcfdfa; color: #879078; }

@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import {
-  createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification, signInAnonymously,
+  createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
   sendPasswordResetEmail, signInWithEmailAndPassword, signOut, User,
 } from "firebase/auth";
 import {
@@ -26,6 +27,7 @@ const categories: MaterialCategory[] = ["Guidelines", "Presentation", "Reference
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const START_ACCESS_CODE = "aew2026";
 const GUEST_ACCESS_STORAGE_KEY = "aew-congress-guest-access";
+const GUEST_SESSION_STORAGE_KEY = "aew-congress-guest-evaluation-session";
 const contestMechanicsSanitizeOptions: sanitizeHtml.IOptions = {
   allowedTags: ["a", "b", "blockquote", "br", "div", "em", "font", "h1", "h2", "h3", "h4", "hr", "i", "img", "li", "ol", "p", "s", "span", "strike", "strong", "sub", "sup", "u", "ul"],
   allowedAttributes: { "*": ["style"], a: ["href", "rel", "target", "title"], font: ["color", "face", "size"], img: ["alt", "height", "src", "title", "width"] },
@@ -49,6 +51,19 @@ type DeleteTarget = { kind: "program" | "material" | "mechanics" | "speaker"; id
 
 function sanitizeContestMechanicsHtml(value: string) {
   return sanitizeHtml(value, contestMechanicsSanitizeOptions).trim();
+}
+
+function createGuestEvaluationSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `guest-${crypto.randomUUID().toLowerCase()}`;
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return `guest-${uuid}`;
 }
 
 function createContestTeamId() {
@@ -364,6 +379,7 @@ export default function Experience() {
   const [user, setUser] = useState<User | null>(null);
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(null);
   const [guestAccess, setGuestAccess] = useState(false);
+  const [guestEvaluationSessionId, setGuestEvaluationSessionId] = useState("");
   const [section, setSection] = useState<Section>("home");
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const [selectedDay, setSelectedDay] = useState(0);
@@ -409,7 +425,7 @@ export default function Experience() {
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
   const canViewPhotoDocs = guestAccess || isRegularMember || isAdmin || isSuperadmin;
-  const canEvaluate = isRegularMember || guestAccess;
+  const canEvaluate = isRegularMember || (guestAccess && (!user || user.isAnonymous));
   const isDesignatedJudge = activeProfile?.judge === "Yes" || profiles.some((profile) => profile.uid === user?.uid && profile.judge === "Yes");
   const canJudgeContests = Boolean(user?.emailVerified && isDesignatedJudge && (isAdmin || isRegularMember));
   const signedIn = isAdmin || isApprovedMember || guestAccess;
@@ -434,18 +450,21 @@ export default function Experience() {
     catch { /* Guest mode can still be entered for the current visit if storage is unavailable. */ }
     if (!guestSessionActive) return;
     setGuestAccess(true);
-    if (!auth.currentUser) {
-      void signInAnonymously(auth).then(() => setGuestAuthError("")).catch(() => {
-        setGuestAuthError("Guest evaluation is unavailable until Firebase Anonymous Authentication is enabled.");
-        setToast({ kind: "error", text: "Guest evaluation needs Anonymous Authentication enabled in Firebase." });
-      });
-    }
+    let guestSessionId = "";
+    try { guestSessionId = window.localStorage.getItem(GUEST_SESSION_STORAGE_KEY) || ""; } catch { /* Use a session-only ID when storage is unavailable. */ }
+    if (!guestSessionId) guestSessionId = auth.currentUser?.isAnonymous ? auth.currentUser.uid : createGuestEvaluationSessionId();
+    setGuestEvaluationSessionId(guestSessionId);
+    try { window.localStorage.setItem(GUEST_SESSION_STORAGE_KEY, guestSessionId); } catch { /* Keep the ID for this visit if storage is unavailable. */ }
+    if (auth.currentUser?.isAnonymous && auth.currentUser.uid !== guestSessionId) void signOut(auth).catch(() => undefined);
   }, [authReady]);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const attendanceConfirmationId = user && selectedProgram ? `${selectedProgram.id}_${user.uid}` : "";
-  const evaluationRespondentUid = user && (isRegularMember || (guestAccess && user.isAnonymous)) ? user.uid : "";
+  const evaluationRespondentUid = isRegularMember && user
+    ? user.uid
+    : guestAccess && (!user || user.isAnonymous) ? guestEvaluationSessionId : "";
   const evaluationKey = selectedProgram && evaluationRespondentUid ? `${selectedProgram.id}:${evaluationRespondentUid}` : "";
-  const evaluationChecking = canEvaluate && !guestAuthError && (!evaluationKey || evaluationStatus.key !== evaluationKey || evaluationStatus.loading);
+  const evaluationButtonVisible = canEvaluate && selectedProgram?.evaluationRevealed === true;
+  const evaluationChecking = evaluationButtonVisible && !guestAuthError && (!evaluationKey || evaluationStatus.key !== evaluationKey || evaluationStatus.loading);
   const evaluationSubmitted = Boolean(evaluationKey && evaluationStatus.key === evaluationKey && evaluationStatus.submitted);
   const attendanceChecking = isRegularMember && (!attendanceConfirmationId || attendanceStatus.id !== attendanceConfirmationId || attendanceStatus.loading);
   const attendanceConfirmed = isRegularMember && attendanceStatus.id === attendanceConfirmationId && attendanceStatus.confirmed;
@@ -465,7 +484,7 @@ export default function Experience() {
   }, [isRegularMember, attendanceConfirmationId]);
 
   useEffect(() => {
-    if (!selectedProgram || !evaluationRespondentUid) {
+    if (!selectedProgram || selectedProgram.evaluationRevealed !== true || !evaluationRespondentUid) {
       setEvaluationStatus({ key: evaluationKey, submitted: false, loading: false });
       return;
     }
@@ -476,7 +495,7 @@ export default function Experience() {
       setEvaluationStatus({ key: evaluationKey, submitted: false, loading: false });
       setToast({ kind: "error", text: errorText(error) });
     });
-  }, [selectedProgram?.id, evaluationRespondentUid, evaluationKey]);
+  }, [selectedProgram?.id, selectedProgram?.evaluationRevealed, evaluationRespondentUid, evaluationKey]);
 
   const days = useMemo(() => {
     if (!selectedProgram) return [];
@@ -1080,7 +1099,7 @@ export default function Experience() {
         setSelectedProgramId(editingProgram.id);
         setToast({ kind: "success", text: "Program updated." });
       } else {
-        const created = await addDoc(collection(db, "programs"), { ...payload, createdBy: adminUser.uid });
+        const created = await addDoc(collection(db, "programs"), { ...payload, evaluationRevealed: false, createdBy: adminUser.uid });
         setSelectedProgramId(created.id);
         setToast({ kind: "success", text: "Program published." });
       }
@@ -1180,6 +1199,17 @@ export default function Experience() {
       await getVerifiedAdmin();
       await updateDoc(doc(db, "materials", material.id), { enabled, updatedAt: serverTimestamp() });
       setToast({ kind: "success", text: enabled ? "Material is now visible to regular users." : "Material is hidden from regular users." });
+    } catch (error) { showError(error); }
+  }
+
+  async function toggleProgramEvaluationVisibility(program: Program) {
+    if (!user || !isAdmin) return;
+    const evaluationRevealed = program.evaluationRevealed !== true;
+    try {
+      await getVerifiedAdmin();
+      await updateDoc(doc(db, "programs", program.id), { evaluationRevealed, updatedAt: serverTimestamp() });
+      setEvaluationMasterlistProgram((current) => current?.id === program.id ? { ...current, evaluationRevealed } : current);
+      setToast({ kind: "success", text: evaluationRevealed ? `Evaluate is now visible for ${program.eventTitle}.` : `Evaluate is now hidden for ${program.eventTitle}.` });
     } catch (error) { showError(error); }
   }
 
@@ -1480,8 +1510,12 @@ export default function Experience() {
 
   async function logout() {
     setGuestAccess(false);
+    setGuestEvaluationSessionId("");
     setGuestAuthError("");
-    try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    try {
+      window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY);
+      window.localStorage.removeItem(GUEST_SESSION_STORAGE_KEY);
+    } catch { /* Ignore unavailable storage. */ }
     await signOut(auth);
     setSection("home");
     setMobileMenuOpen(false);
@@ -1489,34 +1523,55 @@ export default function Experience() {
     setToast({ kind: "success", text: "You have signed out." });
   }
 
-  async function enterGuestAccess() {
+  async function enterGuestAccess(accessCode = START_ACCESS_CODE) {
+    if (accessCode.trim() !== START_ACCESS_CODE) return;
     let guestSessionWasActive = false;
-    try { guestSessionWasActive = window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active"; }
+    let guestSessionId = "";
+    try {
+      guestSessionWasActive = window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active";
+      guestSessionId = guestSessionWasActive ? window.localStorage.getItem(GUEST_SESSION_STORAGE_KEY) || "" : "";
+    }
     catch { /* Begin a fresh guest session for this visit. */ }
-    setGuestAccess(true);
-    setGuestAuthError("");
-    try { window.localStorage.setItem(GUEST_ACCESS_STORAGE_KEY, "active"); } catch { /* Keep guest access for this visit if storage is unavailable. */ }
     setStartAccessOpen(false);
     setMobileMenuOpen(false);
     setSection("home");
-    try {
-      if (auth.currentUser && !auth.currentUser.isAnonymous) {
-        setGuestAccess(false);
-        try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    const currentUser = auth.currentUser;
+    if (currentUser && !currentUser.isAnonymous) {
+      setGuestAccess(false);
+      setGuestEvaluationSessionId("");
+      try {
+        window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY);
+        window.localStorage.removeItem(GUEST_SESSION_STORAGE_KEY);
+      } catch { /* Ignore unavailable storage. */ }
+      return;
+    }
+    if (!guestSessionId) guestSessionId = guestSessionWasActive && currentUser?.isAnonymous
+      ? currentUser.uid
+      : createGuestEvaluationSessionId();
+    if (currentUser?.isAnonymous && currentUser.uid !== guestSessionId) {
+      try { await signOut(auth); }
+      catch {
+        setToast({ kind: "error", text: "Could not start a fresh guest session. Please try again." });
         return;
       }
-      if (auth.currentUser?.isAnonymous && !guestSessionWasActive) await signOut(auth);
-      if (!auth.currentUser) await signInAnonymously(auth);
-    } catch {
-      setGuestAuthError("Guest evaluation is unavailable until Firebase Anonymous Authentication is enabled.");
-      setToast({ kind: "error", text: "Guest browsing is available, but evaluations need Anonymous Authentication enabled in Firebase." });
     }
+    setGuestAccess(true);
+    setGuestEvaluationSessionId(guestSessionId);
+    setGuestAuthError("");
+    try {
+      window.localStorage.setItem(GUEST_ACCESS_STORAGE_KEY, "active");
+      window.localStorage.setItem(GUEST_SESSION_STORAGE_KEY, guestSessionId);
+    } catch { /* Keep guest access for this visit if storage is unavailable. */ }
   }
 
   async function exitGuestAccess() {
     setGuestAccess(false);
+    setGuestEvaluationSessionId("");
     setGuestAuthError("");
-    try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    try {
+      window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY);
+      window.localStorage.removeItem(GUEST_SESSION_STORAGE_KEY);
+    } catch { /* Ignore unavailable storage. */ }
     if (auth.currentUser?.isAnonymous) await signOut(auth);
     setMobileMenuOpen(false);
     setSection("home");
@@ -1592,7 +1647,7 @@ export default function Experience() {
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
               <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
-              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side"><div className="schedule-resource-actions">{canViewPhotoDocs && <a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a>}{canEvaluate && <button type="button" className={`button photo-docs-button evaluation-launch-button${evaluationSubmitted ? " evaluation-launch-button--done" : ""}`} disabled={Boolean(guestAuthError) || evaluationChecking || evaluationSubmitted} onClick={() => selectedProgram && setEvaluationProgram(selectedProgram)}>{guestAuthError ? "Evaluation unavailable" : evaluationChecking ? "Checking…" : evaluationSubmitted ? "Evaluation Submitted" : "Evaluate"}</button>}</div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
+              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side"><div className="schedule-resource-actions">{canViewPhotoDocs && <a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a>}{evaluationButtonVisible && <button type="button" className={`button photo-docs-button evaluation-launch-button${evaluationSubmitted ? " evaluation-launch-button--done" : ""}`} disabled={Boolean(guestAuthError) || evaluationChecking || evaluationSubmitted} onClick={() => selectedProgram && setEvaluationProgram(selectedProgram)}>{guestAuthError ? "Evaluation unavailable" : evaluationChecking ? "Checking…" : evaluationSubmitted ? "Evaluation Submitted" : "Evaluate"}</button>}</div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => setSearch("")}>Clear search <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>RESPONSIBLE</th></tr></thead><tbody>
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
@@ -1640,8 +1695,8 @@ export default function Experience() {
 
 
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
-      {evaluationProgram && evaluationRespondentUid && <ProgramEvaluationModal key={`${evaluationProgram.id}:${evaluationRespondentUid}`} program={evaluationProgram} respondentUid={evaluationRespondentUid} respondentKind={guestAccess && user?.isAnonymous ? "guest" : "member"} onClose={() => setEvaluationProgram(null)} onSubmitted={() => { setEvaluationStatus({ key: evaluationKey, submitted: true, loading: false }); setEvaluationProgram(null); setToast({ kind: "success", text: "Salamat sa imong feedback. Na-submit na ang evaluation." }); }} />}
-      {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} onClose={() => setEvaluationMasterlistProgram(null)} />}
+      {evaluationProgram && evaluationRespondentUid && <ProgramEvaluationModal key={`${evaluationProgram.id}:${evaluationRespondentUid}`} program={evaluationProgram} respondentUid={evaluationRespondentUid} respondentKind={isRegularMember ? "member" : "guest"} onClose={() => setEvaluationProgram(null)} onSubmitted={() => { setEvaluationStatus({ key: evaluationKey, submitted: true, loading: false }); setEvaluationProgram(null); setToast({ kind: "success", text: "Salamat sa imong feedback. Na-submit na ang evaluation." }); }} />}
+      {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} canManageVisibility={isAdmin} onToggleVisibility={toggleProgramEvaluationVisibility} onClose={() => setEvaluationMasterlistProgram(null)} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
@@ -1902,7 +1957,7 @@ function ContestJoinConfirmationModal({ contestName, eventTitle, busy, onCancel,
   </div>;
 }
 
-function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: () => void }) {
+function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: (code: string) => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -1938,7 +1993,7 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
           const scannedCode = result.getText().trim();
           setCode(scannedCode);
           setScannerOpen(false);
-          if (scannedCode === START_ACCESS_CODE) onEnterRef.current();
+          if (scannedCode === START_ACCESS_CODE) onEnterRef.current(scannedCode);
           else setError("This QR code is not valid for guest access. Enter the access code manually.");
         });
         controls = scannerControls;
@@ -1968,7 +2023,7 @@ function StartAccessModal({ onClose, onEnter }: { onClose: () => void; onEnter: 
       setError("That access code is not valid. Please try again.");
       return;
     }
-    onEnter();
+    onEnter(code.trim());
   }
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
@@ -2239,7 +2294,9 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
 function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics; onClose: () => void }) {
   const criteria = contest.criteria ?? [];
   const criteriaSignature = criteria.map((criterion) => `${criterion.criteria}:${criterion.weight}`).join("|");
-  const [rankings, setRankings] = useState<Array<{ rank: number; name: string; criterionScores: Array<number | null>; criterionJudges: number[]; judgeCount: number; total: number }>>([]);
+  const [rankings, setRankings] = useState<Array<{ rank: number; name: string; criterionScores: Array<number | null>; criterionJudges: number[]; judgeCount: number; total: number; judgeScores: Array<number | null> }>>([]);
+  const [judgeLabels, setJudgeLabels] = useState<string[]>([]);
+  const [judgeNames, setJudgeNames] = useState<string[]>([]);
   const [judgeSheetCount, setJudgeSheetCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -2249,11 +2306,30 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
     setLoading(true);
     setError("");
     getDocs(collection(db, "contestScoreSheets", contest.id, "judges"))
-      .then((snapshot) => {
+      .then(async (snapshot) => {
         if (cancelled) return;
         type JudgeTeamScores = { name: string; sums: number[]; counts: number[] };
-        type CombinedTeamScores = { name: string; sums: number[]; counts: number[]; judges: Set<string> };
+        type CombinedTeamScores = { name: string; sums: number[]; counts: number[]; judges: Set<string>; judgeTotals: Map<string, number> };
         const combined = new Map<string, CombinedTeamScores>();
+        const judgeProfiles = await Promise.all(snapshot.docs.map(async (document, index) => {
+          const sheet = document.data() as ContestScoreSheet;
+          const uid = sheet.judgeUid || document.id;
+          let judgeName = "";
+          try {
+            const profileSnapshot = await getDoc(doc(db, "userProfiles", uid));
+            if (profileSnapshot.exists()) {
+              const profile = profileSnapshot.data() as UserProfile;
+              const middleName = profile.middleName?.trim() ?? "";
+              const middleInitial = middleName ? `${Array.from(middleName)[0]}.` : "";
+              judgeName = [profile.firstName, middleInitial, profile.lastName, profile.suffix].filter(Boolean).join(" ").trim().toLocaleUpperCase();
+            }
+          } catch { /* Keep a judge number if the profile cannot be read. */ }
+          return { uid, label: `JUDGE ${index + 1}`, name: judgeName || `JUDGE ${index + 1}` };
+        }));
+        if (cancelled) return;
+        const orderedJudgeIds = judgeProfiles.map((judge) => judge.uid);
+        setJudgeLabels(judgeProfiles.map((judge) => judge.label));
+        setJudgeNames(judgeProfiles.map((judge) => judge.name));
         snapshot.docs.forEach((document) => {
           const sheet = document.data() as ContestScoreSheet;
           const judgeId = sheet.judgeUid || document.id;
@@ -2278,18 +2354,24 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
           perJudge.forEach((judgeTeam, teamKey) => {
             let team = combined.get(teamKey);
             if (!team) {
-              team = { name: judgeTeam.name, sums: criteria.map(() => 0), counts: criteria.map(() => 0), judges: new Set<string>() };
+              team = { name: judgeTeam.name, sums: criteria.map(() => 0), counts: criteria.map(() => 0), judges: new Set<string>(), judgeTotals: new Map<string, number>() };
               combined.set(teamKey, team);
             }
             let submittedScore = false;
+            let judgeTotal = 0;
             criteria.forEach((_, criterionIndex) => {
               const scoreCount = judgeTeam.counts[criterionIndex];
               if (scoreCount === 0) return;
-              team!.sums[criterionIndex] += judgeTeam.sums[criterionIndex] / scoreCount;
+              const criterionAverage = judgeTeam.sums[criterionIndex] / scoreCount;
+              team!.sums[criterionIndex] += criterionAverage;
               team!.counts[criterionIndex] += 1;
+              judgeTotal += criterionAverage;
               submittedScore = true;
             });
-            if (submittedScore) team.judges.add(judgeId);
+            if (submittedScore) {
+              team.judges.add(judgeId);
+              team.judgeTotals.set(judgeId, judgeTotal);
+            }
           });
         });
         const sorted = Array.from(combined.values()).map((team) => {
@@ -2301,6 +2383,7 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
             criterionJudges: [...team.counts],
             judgeCount: team.judges.size,
             total: criterionScores.reduce<number>((total, score) => total + (score ?? 0), 0),
+            judgeScores: orderedJudgeIds.map((judgeId) => team.judgeTotals.get(judgeId) ?? null),
           };
         }).filter((team) => team.judgeCount > 0).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
         let currentRank = 0;
@@ -2327,9 +2410,24 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
     return Number(value.toFixed(2)).toString();
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  function printTabulation() {
+    const frameImages = Array.from(document.querySelectorAll<HTMLImageElement>(".contest-tabulation-page-frame"));
+    void Promise.all(frameImages.map((image) => image.decode().catch(() => undefined))).then(() => window.print());
+  }
+
+  const printJudgeLabels = judgeLabels.length ? judgeLabels : ["JUDGE 1", "JUDGE 2", "JUDGE 3"];
+  const printRows = rankings.length ? rankings.map((team) => ({
+    name: team.name,
+    judgeScores: team.judgeScores,
+    total: team.total,
+    rank: String(team.rank),
+  })) : (contest.teams?.length ? contest.teams.map((team) => ({ name: team.name, judgeScores: printJudgeLabels.map(() => null), total: null, rank: "" })) : Array.from({ length: 3 }, () => ({ name: "", judgeScores: printJudgeLabels.map(() => null), total: null, rank: "" })));
+  const printPages = Array.from({ length: Math.ceil(printRows.length / 12) }, (_, index) => printRows.slice(index * 12, (index + 1) * 12));
+
+  return <>
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="form-modal contest-rankings-modal" role="dialog" aria-modal="true" aria-labelledby="contest-rankings-title">
-      <div className="form-modal-head"><div><span className="eyebrow">CONTEST RANKINGS</span><h2 id="contest-rankings-title">Team ranking<span>.</span></h2><p>{contest.contest} · {contest.eventTitle}</p><small>Each criterion is averaged across judges who scored it. The total is the sum of those weighted averages.</small></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close ranking"><X size={19} /></button></div>
+      <div className="form-modal-head"><div className="contest-ranking-heading"><span className="eyebrow">CONTEST RANKINGS</span><h2 id="contest-rankings-title">Team ranking<span>.</span></h2><p>{contest.contest} · {contest.eventTitle}</p><div className="contest-ranking-explainer"><small>Each criterion is averaged across judges who scored it. The total is the sum of those weighted averages.</small><button type="button" className="button button--soft contest-rankings-print-button" onClick={printTabulation}><Printer size={14} /> Print</button></div></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close ranking"><X size={19} /></button></div>
       {loading ? <p className="ranking-message">Loading judge score sheets…</p> : error ? <p className="ranking-message ranking-message--error" role="alert">{error}</p> : rankings.length === 0 ? <div className="ranking-empty"><strong>No judge scores are available yet.</strong><span>Rankings will appear after judges save their score sheets.</span></div> : <>
         <p className="ranking-summary">{String(rankings.length).padStart(2, "0")} teams ranked · {judgeSheetCount} {judgeSheetCount === 1 ? "judge sheet" : "judge sheets"} · Maximum total {scoreText(contestWeightTotal(criteria))}%</p>
         <div className="ranking-table-wrap"><table className="ranking-table"><thead><tr><th>RANK</th><th>TEAM</th>{criteria.map((criterion, index) => <th key={`${criterion.criteria}-${index}`}><span>{criterion.criteria}</span><small>Max {scoreText(Number(criterion.weight) || 0)}%</small></th>)}<th>JUDGES</th><th>TOTAL</th></tr></thead><tbody>
@@ -2338,7 +2436,36 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
       </>}
       <div className="form-modal-actions"><button className="button button--soft" onClick={onClose}>Close</button></div>
     </section>
-  </div>;
+    </div>
+    {typeof document !== "undefined" && createPortal(<div className="contest-tabulation-print" aria-hidden="true">
+      {printPages.map((pageRows, pageIndex) => <section className="contest-tabulation-page" key={`print-page-${pageIndex}`}>
+        <img className="contest-tabulation-page-frame" src="/a4_size_header_footer.jpg" alt="" />
+        <div className="contest-tabulation-page-content">
+          <h1>TABULATION TABLE</h1>
+          <div className="contest-tabulation-details">
+            <p><strong>Activity:</strong> {contest.eventTitle}</p>
+            <p><strong>Contest/Competition:</strong> {contest.contest}</p>
+            <p><strong>Date:</strong> {contest.contestDate ? displayDate(contest.contestDate) : dateRange(contest.dateFrom, contest.dateTo)}</p>
+          </div>
+          <table className="contest-tabulation-table">
+            <colgroup>
+              <col style={{ width: "28%" }} />
+              {printJudgeLabels.map((label) => <col key={label} style={{ width: `${41 / printJudgeLabels.length}%` }} />)}
+              <col style={{ width: "19%" }} />
+              <col style={{ width: "12%" }} />
+            </colgroup>
+            <thead><tr><th>CONTESTANTS</th>{printJudgeLabels.map((label) => <th key={label}>{label}</th>)}<th>WEIGHTED AVERAGE</th><th>RANKING</th></tr></thead>
+            <tbody>{pageRows.map((team, rowIndex) => <tr key={`${team.name}-${pageIndex}-${rowIndex}`}><td>{team.name}</td>{printJudgeLabels.map((label, judgeIndex) => <td key={`${label}-${rowIndex}`}>{team.judgeScores[judgeIndex] === null || team.judgeScores[judgeIndex] === undefined ? "" : `${scoreText(team.judgeScores[judgeIndex] ?? 0)}%`}</td>)}<td>{team.total === null ? "" : `${scoreText(team.total)}%`}</td><td>{team.rank}</td></tr>)}</tbody>
+          </table>
+          {pageIndex === printPages.length - 1 && <div className="contest-tabulation-signatures">
+            <p className="contest-tabulation-certified"><strong>Certified:</strong></p>
+            <div className="contest-tabulation-judge-signatures">{Array.from({ length: 3 }, (_, index) => <div key={`signature-${index}`}><strong>{judgeNames[index] || `JUDGE ${index + 1}`}</strong><small>Printed Name and Signature</small></div>)}</div>
+            <div className="contest-tabulation-noted"><strong>Noted:</strong><div className="contest-tabulation-noted-spacer" aria-hidden="true" /><div className="contest-tabulation-noted-spacer" aria-hidden="true" /><p><b>MELODY M. GUIMARY</b><span><i>Chief</i>, FOD</span></p></div>
+          </div>}
+        </div>
+      </section>)}
+    </div>, document.body)}
+  </>;
 }
 function ContestCriteriaModal({ contest, onClose }: { contest: ContestMechanics; onClose: () => void }) {
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>

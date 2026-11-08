@@ -45,6 +45,10 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == 'regular');
     }
 
+    function isEvaluationGuest() {
+      return signedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
     function isDesignatedJudge() {
       return verified()
         && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
@@ -171,6 +175,44 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/programs/$(request.resource.data.programId))
         && request.resource.data.confirmedAt == request.time;
       allow update, delete: if false;
+    }
+
+    match /programEvaluations/{programId}/responses/{respondentUid} {
+      allow get: if isAdmin()
+        || (signedIn() && respondentUid == request.auth.uid && (isRegularMember() || isEvaluationGuest()));
+      allow list: if isAdmin();
+      allow create: if respondentUid == request.auth.uid
+        && ((isRegularMember() && request.resource.data.respondentKind == 'member')
+          || (isEvaluationGuest() && request.resource.data.respondentKind == 'guest'))
+        && request.resource.data.programId == programId
+        && request.resource.data.respondentUid == request.auth.uid
+        && request.resource.data.keys().hasAll([
+          'programId', 'programTitle', 'respondentUid', 'respondentKind', 'name',
+          'clientType', 'beneficiaryType', 'beneficiaryCategory', 'beneficiaryOther',
+          'registrationId', 'contactNo', 'groupName', 'firstName', 'middleName',
+          'lastName', 'suffix', 'region', 'province', 'cityMunicipality', 'barangay',
+          'street', 'sex', 'birthdate', 'membership', 'interventions',
+          'interventionOtherQuantity', 'interventionOtherDetail', 'cc1', 'cc2', 'cc3',
+          'overallSatisfaction', 'qualityScores', 'deliveryScore', 'suggestions',
+          'caDistributed', 'submittedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'programId', 'programTitle', 'respondentUid', 'respondentKind', 'name',
+          'clientType', 'beneficiaryType', 'beneficiaryCategory', 'beneficiaryOther',
+          'registrationId', 'contactNo', 'groupName', 'firstName', 'middleName',
+          'lastName', 'suffix', 'region', 'province', 'cityMunicipality', 'barangay',
+          'street', 'sex', 'birthdate', 'membership', 'interventions',
+          'interventionOtherQuantity', 'interventionOtherDetail', 'cc1', 'cc2', 'cc3',
+          'overallSatisfaction', 'qualityScores', 'deliveryScore', 'suggestions',
+          'caDistributed', 'submittedAt'
+        ])
+        && request.resource.data.caDistributed == false
+        && request.resource.data.submittedAt == request.time
+        && exists(/databases/$(database)/documents/programs/$(programId));
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caDistributed'])
+        && request.resource.data.caDistributed is bool;
+      allow delete: if false;
     }
 
     // Email documents are server-created and consumed by the Firebase Trigger Email extension.

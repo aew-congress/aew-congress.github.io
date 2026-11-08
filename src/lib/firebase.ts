@@ -125,6 +125,46 @@ export type AttendanceConfirmation = {
   confirmedAt?: unknown;
 };
 
+export type ProgramEvaluation = {
+  id: string;
+  programId: string;
+  programTitle: string;
+  respondentUid: string;
+  respondentKind: "member" | "guest";
+  name: string;
+  clientType: string;
+  beneficiaryType: string;
+  beneficiaryCategory: string;
+  beneficiaryOther: string;
+  registrationId: string;
+  contactNo: string;
+  groupName: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  suffix: string;
+  region: string;
+  province: string;
+  cityMunicipality: string;
+  barangay: string;
+  street: string;
+  sex: string;
+  birthdate: string;
+  membership: string;
+  interventions: string[];
+  interventionOtherQuantity: string;
+  interventionOtherDetail: string;
+  cc1: string;
+  cc2: string;
+  cc3: string;
+  overallSatisfaction: string;
+  qualityScores: string[];
+  deliveryScore: string;
+  suggestions: string;
+  caDistributed: boolean;
+  submittedAt?: unknown;
+};
+
 export type MaterialCategory = "Guidelines" | "Presentation" | "References" | "Worksheet" | "Program Flow" | "Communication Letter";
 export type MaterialFile = { url: string; name: string; type?: string };
 export type MaterialImage = { url: string; name: string };

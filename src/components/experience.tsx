@@ -5,7 +5,7 @@ import {
   addDoc, collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import {
-  createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
+  createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification, signInAnonymously,
   sendPasswordResetEmail, signInWithEmailAndPassword, signOut, User,
 } from "firebase/auth";
 import {
@@ -19,6 +19,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs
 import sanitizeHtml from "sanitize-html";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, ContestTeam, Material, MaterialCategory, MaterialFile, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SpeakerProfileCard, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
+import { ProgramEvaluationMasterlistModal, ProgramEvaluationModal } from "@/components/program-evaluation";
 
 type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
@@ -372,6 +373,10 @@ export default function Experience() {
   const [attendanceStatus, setAttendanceStatus] = useState<{ id: string; confirmed: boolean; loading: boolean }>({ id: "", confirmed: false, loading: false });
   const [attendanceConfirmOpen, setAttendanceConfirmOpen] = useState(false);
   const [attendanceSubmitting, setAttendanceSubmitting] = useState(false);
+  const [evaluationStatus, setEvaluationStatus] = useState<{ key: string; submitted: boolean; loading: boolean }>({ key: "", submitted: false, loading: false });
+  const [evaluationProgram, setEvaluationProgram] = useState<Program | null>(null);
+  const [evaluationMasterlistProgram, setEvaluationMasterlistProgram] = useState<Program | null>(null);
+  const [guestAuthError, setGuestAuthError] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [startAccessOpen, setStartAccessOpen] = useState(false);
@@ -404,6 +409,7 @@ export default function Experience() {
   const isApprovedMember = Boolean(user && !isAdmin && activeProfile?.status === "Approved" && user.emailVerified);
   const isRegularMember = isApprovedMember && profileRole(activeProfile ?? {}) === "regular";
   const canViewPhotoDocs = guestAccess || isRegularMember || isAdmin || isSuperadmin;
+  const canEvaluate = isRegularMember || guestAccess;
   const isDesignatedJudge = activeProfile?.judge === "Yes" || profiles.some((profile) => profile.uid === user?.uid && profile.judge === "Yes");
   const canJudgeContests = Boolean(user?.emailVerified && isDesignatedJudge && (isAdmin || isRegularMember));
   const signedIn = isAdmin || isApprovedMember || guestAccess;
@@ -422,12 +428,25 @@ export default function Experience() {
     }
   }, []);
   useEffect(() => {
-    try {
-      if (window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active") setGuestAccess(true);
-    } catch { /* Guest mode can still be entered for the current visit if storage is unavailable. */ }
-  }, []);
+    if (!authReady) return;
+    let guestSessionActive = false;
+    try { guestSessionActive = window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active"; }
+    catch { /* Guest mode can still be entered for the current visit if storage is unavailable. */ }
+    if (!guestSessionActive) return;
+    setGuestAccess(true);
+    if (!auth.currentUser) {
+      void signInAnonymously(auth).then(() => setGuestAuthError("")).catch(() => {
+        setGuestAuthError("Guest evaluation is unavailable until Firebase Anonymous Authentication is enabled.");
+        setToast({ kind: "error", text: "Guest evaluation needs Anonymous Authentication enabled in Firebase." });
+      });
+    }
+  }, [authReady]);
   const selectedProgram = programs.find((program) => program.id === selectedProgramId) ?? programs[0];
   const attendanceConfirmationId = user && selectedProgram ? `${selectedProgram.id}_${user.uid}` : "";
+  const evaluationRespondentUid = user && (isRegularMember || (guestAccess && user.isAnonymous)) ? user.uid : "";
+  const evaluationKey = selectedProgram && evaluationRespondentUid ? `${selectedProgram.id}:${evaluationRespondentUid}` : "";
+  const evaluationChecking = canEvaluate && !guestAuthError && (!evaluationKey || evaluationStatus.key !== evaluationKey || evaluationStatus.loading);
+  const evaluationSubmitted = Boolean(evaluationKey && evaluationStatus.key === evaluationKey && evaluationStatus.submitted);
   const attendanceChecking = isRegularMember && (!attendanceConfirmationId || attendanceStatus.id !== attendanceConfirmationId || attendanceStatus.loading);
   const attendanceConfirmed = isRegularMember && attendanceStatus.id === attendanceConfirmationId && attendanceStatus.confirmed;
 
@@ -444,6 +463,20 @@ export default function Experience() {
       setToast({ kind: "error", text: errorText(error) });
     });
   }, [isRegularMember, attendanceConfirmationId]);
+
+  useEffect(() => {
+    if (!selectedProgram || !evaluationRespondentUid) {
+      setEvaluationStatus({ key: evaluationKey, submitted: false, loading: false });
+      return;
+    }
+    setEvaluationStatus({ key: evaluationKey, submitted: false, loading: true });
+    return onSnapshot(doc(db, "programEvaluations", selectedProgram.id, "responses", evaluationRespondentUid), (snapshot) => {
+      setEvaluationStatus({ key: evaluationKey, submitted: snapshot.exists(), loading: false });
+    }, (error) => {
+      setEvaluationStatus({ key: evaluationKey, submitted: false, loading: false });
+      setToast({ kind: "error", text: errorText(error) });
+    });
+  }, [selectedProgram?.id, evaluationRespondentUid, evaluationKey]);
 
   const days = useMemo(() => {
     if (!selectedProgram) return [];
@@ -516,6 +549,17 @@ export default function Experience() {
       setLoadingStartedAt((startedAt) => startedAt ?? Date.now());
       try {
         if (!current) { setUser(null); setActiveProfile(null); return; }
+        if (current.isAnonymous) {
+          let guestSessionActive = false;
+          try { guestSessionActive = window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active"; }
+          catch { /* Continue with the current guest visit if storage is unavailable. */ }
+          setUser(guestSessionActive ? current : null);
+          setActiveProfile(null);
+          setGuestAccess(guestSessionActive);
+          if (guestSessionActive) setGuestAuthError("");
+          return;
+        }
+        setGuestAuthError("");
         setGuestAccess(false);
         try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
         // Login and registration handle verification and approval in sequence. Avoid
@@ -1435,26 +1479,45 @@ export default function Experience() {
   }
 
   async function logout() {
-    await signOut(auth);
     setGuestAccess(false);
+    setGuestAuthError("");
     try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    await signOut(auth);
     setSection("home");
     setMobileMenuOpen(false);
     setAttendanceConfirmOpen(false);
     setToast({ kind: "success", text: "You have signed out." });
   }
 
-  function enterGuestAccess() {
+  async function enterGuestAccess() {
+    let guestSessionWasActive = false;
+    try { guestSessionWasActive = window.localStorage.getItem(GUEST_ACCESS_STORAGE_KEY) === "active"; }
+    catch { /* Begin a fresh guest session for this visit. */ }
     setGuestAccess(true);
+    setGuestAuthError("");
     try { window.localStorage.setItem(GUEST_ACCESS_STORAGE_KEY, "active"); } catch { /* Keep guest access for this visit if storage is unavailable. */ }
     setStartAccessOpen(false);
     setMobileMenuOpen(false);
     setSection("home");
+    try {
+      if (auth.currentUser && !auth.currentUser.isAnonymous) {
+        setGuestAccess(false);
+        try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+        return;
+      }
+      if (auth.currentUser?.isAnonymous && !guestSessionWasActive) await signOut(auth);
+      if (!auth.currentUser) await signInAnonymously(auth);
+    } catch {
+      setGuestAuthError("Guest evaluation is unavailable until Firebase Anonymous Authentication is enabled.");
+      setToast({ kind: "error", text: "Guest browsing is available, but evaluations need Anonymous Authentication enabled in Firebase." });
+    }
   }
 
-  function exitGuestAccess() {
+  async function exitGuestAccess() {
     setGuestAccess(false);
+    setGuestAuthError("");
     try { window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
+    if (auth.currentUser?.isAnonymous) await signOut(auth);
     setMobileMenuOpen(false);
     setSection("home");
     setToast({ kind: "info", text: "Guest access has ended." });
@@ -1501,7 +1564,7 @@ export default function Experience() {
         {section === "approval" && isSuperadmin ? (
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeJudge={changeJudge} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
-          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
+          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onViewEvaluations={setEvaluationMasterlistProgram} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
@@ -1529,7 +1592,7 @@ export default function Experience() {
 
             {selectedProgram ? <section className="content-wrap schedule-section" id="schedule">
               <div className="schedule-topline"><div className="schedule-kicker"><span className="live-pill"><span />PROGRAM FLOW</span><span className="schedule-location"><MapPin size={13} />{selectedProgram?.venue}</span></div><div className="schedule-tools"><label className="search-box"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sessions or people" aria-label="Search sessions or people" /><kbd>⌘ K</kbd></label>{isRegularMember && <button type="button" className={`button attendance-confirm-button ${attendanceConfirmed ? "attendance-confirm-button--done" : "button--olive"}`} disabled={attendanceChecking || attendanceConfirmed || attendanceSubmitting} onClick={() => setAttendanceConfirmOpen(true)}>{attendanceConfirmed ? <Check size={15} /> : <BadgeCheck size={15} />}{attendanceChecking ? "Checking attendance…" : attendanceConfirmed ? "Attendance Confirmed" : "Attendance Confirmation"}</button>}</div></div>
-              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side">{canViewPhotoDocs && <a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a>}<div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
+              <div className="schedule-title-row"><div><span className="eyebrow">THE DAILY FLOW</span><h2>{selectedProgram?.eventTitle}</h2>{selectedProgram?.theme && <p className="schedule-theme"><strong>Theme</strong>{selectedProgram.theme}</p>}<p>{selectedProgram?.description || `${dateRange(selectedProgram?.dateFrom ?? "", selectedProgram?.dateTo ?? "")} · ${selectedProgram?.flow.length ?? 0} sessions`}</p></div><div className="schedule-title-side"><div className="schedule-resource-actions">{canViewPhotoDocs && <a className="button photo-docs-button" href="https://drive.google.com/drive/folders/1WQ25nUsUSHAf-rV6ZJtmiK64FwQHLKOs?usp=sharing" target="_blank" rel="noopener noreferrer">Photo Docs <ArrowUpRight size={14} /></a>}{canEvaluate && <button type="button" className={`button photo-docs-button evaluation-launch-button${evaluationSubmitted ? " evaluation-launch-button--done" : ""}`} disabled={Boolean(guestAuthError) || evaluationChecking || evaluationSubmitted} onClick={() => selectedProgram && setEvaluationProgram(selectedProgram)}>{guestAuthError ? "Evaluation unavailable" : evaluationChecking ? "Checking…" : evaluationSubmitted ? "Evaluation Submitted" : "Evaluate"}</button>}</div><div className="day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDay === 0} onClick={() => setSelectedDay(Math.max(0, selectedDay - 1))}><ChevronLeft size={17} /></button><div className="day-tabs">{days.map((day, index) => <button key={day} className={selectedDay === index ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDay(index)}><span>DAY {String(index + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>)}</div><button className="day-arrow" aria-label="Next day" disabled={selectedDay >= days.length - 1} onClick={() => setSelectedDay(Math.min(days.length - 1, selectedDay + 1))}><ChevronRight size={17} /></button></div></div></div>
               <div className="schedule-meta"><span><CalendarDays size={15} />{displayDate(days[selectedDay] ?? "")}</span><span><Clock3 size={15} />{filteredSessions.length} sessions today</span><button onClick={() => setSearch("")}>Clear search <X size={12} /></button></div>
               <div className="schedule-table-wrap"><table className="schedule-table"><thead><tr><th>TIME</th><th>SESSION</th><th>RESPONSIBLE</th></tr></thead><tbody>
                 {scheduleRows.map(({ item, timeRowSpan, timeGroup, period, periodLabel }, index) => {
@@ -1577,6 +1640,8 @@ export default function Experience() {
 
 
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
+      {evaluationProgram && evaluationRespondentUid && <ProgramEvaluationModal key={`${evaluationProgram.id}:${evaluationRespondentUid}`} program={evaluationProgram} respondentUid={evaluationRespondentUid} respondentKind={guestAccess && user?.isAnonymous ? "guest" : "member"} onClose={() => setEvaluationProgram(null)} onSubmitted={() => { setEvaluationStatus({ key: evaluationKey, submitted: true, loading: false }); setEvaluationProgram(null); setToast({ kind: "success", text: "Salamat sa imong feedback. Na-submit na ang evaluation." }); }} />}
+      {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} onClose={() => setEvaluationMasterlistProgram(null)} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
@@ -2077,15 +2142,15 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
   </div>;
 }
 
-function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onToggleMaterialVisibility, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
+function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onViewEvaluations, onAddMaterial, onEditMaterial, onDeleteMaterial, onToggleMaterialVisibility, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
   programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
-  onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
+  onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void; onViewEvaluations: (program: Program) => void;
   onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void; onToggleMaterialVisibility: (material: Material) => void;
   onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; backLabel: string; onBack: () => void;
 }) {
-  const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
+  const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }, onView?: () => void) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}{onView && <button type="button" className="manage-action-button" aria-label={`View evaluations for ${label}`} title="View evaluation masterlist" onClick={onView}><Eye size={15} /></button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
   return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> {backLabel}</button><div className="section-heading"><div><span className="eyebrow">ADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
-    <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program), undefined, () => onViewEvaluations(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest Criteria</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest criteria have been added yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material), { enabled: material.enabled !== false, onToggle: () => onToggleMaterialVisibility(material) })}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
   </div></div>;

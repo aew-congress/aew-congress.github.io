@@ -1139,6 +1139,16 @@ export default function Experience() {
     } catch (error) { showError(error); }
   }
 
+  async function toggleContestRankingVisibility(contest: ContestMechanics) {
+    if (!user || !isSuperadmin) return;
+    const rankingsRevealed = contest.rankingsRevealed !== true;
+    try {
+      await getVerifiedAdmin();
+      await updateDoc(doc(db, "contestMechanics", contest.id), { rankingsRevealed, updatedAt: serverTimestamp() });
+      setToast({ kind: "success", text: rankingsRevealed ? `Rankings for ${contest.contest} are now visible to admins.` : `Rankings for ${contest.contest} are now hidden from admins.` });
+    } catch (error) { showError(error); }
+  }
+
   async function createSpeaker(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user || !isAdmin) { setToast({ kind: "error", text: "Only verified admins can manage speaker profiles." }); return; }
@@ -1291,6 +1301,7 @@ export default function Experience() {
               contestDate,
               timeStart,
               criteria,
+              rankingsRevealed: false,
               mechanicsHtml,
               createdAt: serverTimestamp(),
               createdBy: adminUser.uid,
@@ -1494,7 +1505,7 @@ export default function Experience() {
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
         ) : section === "contestMechanics" && isAdmin ? (
-          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} canViewRanking={isSuperadmin} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onSaveTeams={saveContestTeams} />
+          <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} isSuperadmin={isSuperadmin} onToggleRankingVisibility={toggleContestRankingVisibility} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onSaveTeams={saveContestTeams} />
         ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
           <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
@@ -2121,8 +2132,8 @@ function ContestTeamsModal({ contest, onClose, onSave }: { contest: ContestMecha
   </div>;
 }
 
-function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, canViewRanking, onAdd, onEdit, onDelete, onSaveTeams }: {
-  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; canViewRanking: boolean; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void; onSaveTeams: (contest: ContestMechanics, teams: ContestTeam[]) => Promise<boolean>;
+function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, confirmingJoinId, onConfirmContestant, programs, loading, isSuperadmin, onToggleRankingVisibility, onAdd, onEdit, onDelete, onSaveTeams }: {
+  mechanics: ContestMechanics[]; joins: ContestJoin[]; profiles: UserProfile[]; contestantsLoading: boolean; confirmingJoinId: string; onConfirmContestant: (join: ContestJoin) => void; programs: Program[]; loading: boolean; isSuperadmin: boolean; onToggleRankingVisibility: (contest: ContestMechanics) => void; onAdd: () => void; onEdit: (mechanics: ContestMechanics) => void; onDelete: (mechanics: ContestMechanics) => void; onSaveTeams: (contest: ContestMechanics, teams: ContestTeam[]) => Promise<boolean>;
 }) {
   const [viewingContestants, setViewingContestants] = useState<ContestMechanics | null>(null);
   const [viewingRankings, setViewingRankings] = useState<ContestMechanics | null>(null);
@@ -2144,7 +2155,7 @@ function ContestMechanicsPage({ mechanics, joins, profiles, contestantsLoading, 
         <div className="approval-table-wrap"><table className="approval-table contest-table contest-table--directory"><thead><tr><th>CONTEST</th><th>CONTESTANTS</th><th>ACTIONS</th></tr></thead><tbody>
           {filteredMechanics.map((item) => {
             const contestantCount = joins.filter((join) => join.contestId === item.id).length;
-            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => { setViewingRankings(null); setViewingContestants(item); }}><Eye size={15} />View</button><button className="contest-view teams-manage-view" aria-label={`Manage judging teams for ${item.contest}`} onClick={() => setManagingTeams(item)}><UsersRound size={15} />Teams for Judging</button>{canViewRanking && <button className="contest-view ranking-view" aria-label={`View ranking for ${item.contest}`} onClick={() => { setViewingContestants(null); setViewingRankings(item); }}>View Ranking</button>}</div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button><button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
+            return <tr key={item.id}><td><strong className="table-primary">{item.contest}</strong></td><td><div className="contestant-view-cell"><span>{contestantCount} joined</span><button className="contest-view" aria-label={`View contestants for ${item.contest}`} onClick={() => { setViewingRankings(null); setViewingContestants(item); }}><Eye size={15} />View</button><button className="contest-view teams-manage-view" aria-label={`Manage judging teams for ${item.contest}`} onClick={() => setManagingTeams(item)}><UsersRound size={15} />Teams for Judging</button>{(isSuperadmin || item.rankingsRevealed === true) && <button className="contest-view ranking-view" aria-label={`View ranking for ${item.contest}`} onClick={() => { setViewingContestants(null); setViewingRankings(item); }}>View Ranking</button>}</div></td><td><div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${item.contest}`} title="Edit" onClick={() => onEdit(item)}><Pencil size={15} /></button>{isSuperadmin && <button type="button" className={`manage-action-button ${item.rankingsRevealed === true ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={item.rankingsRevealed === true ? `Unreveal rankings for ${item.contest} to admins` : `Reveal rankings for ${item.contest} to admins`} aria-pressed={item.rankingsRevealed === true} title={item.rankingsRevealed === true ? "Rankings revealed to admins — click to hide" : "Rankings hidden from admins — click to reveal"} onClick={() => onToggleRankingVisibility(item)}>{item.rankingsRevealed === true ? <Eye size={15} /> : <EyeOff size={15} />}</button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${item.contest}`} title="Delete" onClick={() => onDelete(item)}><Trash2 size={15} /></button></div></td></tr>;
           })}
           {!filteredMechanics.length && <tr><td colSpan={5} className="empty-table"><FileCheck2 size={20} /><strong>{loading ? "Loading contest criteria…" : selectedProgramId ? "No contest criteria for this program" : "No contest criteria yet"}</strong><span>{loading ? "Saved contest criteria will appear here." : selectedProgramId ? "Add contest criteria for this program's contests to see them here." : programs.length ? "Add the criteria and scoring details for a program contest." : "Publish a program before adding contest criteria."}</span></td></tr>}
         </tbody></table></div><div className="table-footnote"><span><ShieldCheck size={13} /> Only verified admins can view contestant details and edit contest criteria.</span><span>{filteredMechanics.length} {filteredMechanics.length === 1 ? "contest" : "contests"}</span></div>
@@ -2237,7 +2248,12 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
         setRankings(ranked);
         setJudgeSheetCount(snapshot.size);
       })
-      .catch((loadError) => { if (!cancelled) setError(errorText(loadError)); })
+      .catch((loadError) => {
+        if (cancelled) return;
+        setError((loadError as { code?: string })?.code === "permission-denied"
+          ? "Your account cannot read these results. Confirm this contest is revealed and Firestore rules are up to date."
+          : errorText(loadError));
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [contest.id, criteriaSignature]);
@@ -2248,7 +2264,7 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="form-modal contest-rankings-modal" role="dialog" aria-modal="true" aria-labelledby="contest-rankings-title">
-      <div className="form-modal-head"><div><span className="eyebrow">SUPERADMIN · JUDGE RESULTS</span><h2 id="contest-rankings-title">Team ranking<span>.</span></h2><p>{contest.contest} · {contest.eventTitle}</p><small>Each criterion is averaged across judges who scored it. The total is the sum of those weighted averages.</small></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close ranking"><X size={19} /></button></div>
+      <div className="form-modal-head"><div><span className="eyebrow">CONTEST RANKINGS</span><h2 id="contest-rankings-title">Team ranking<span>.</span></h2><p>{contest.contest} · {contest.eventTitle}</p><small>Each criterion is averaged across judges who scored it. The total is the sum of those weighted averages.</small></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close ranking"><X size={19} /></button></div>
       {loading ? <p className="ranking-message">Loading judge score sheets…</p> : error ? <p className="ranking-message ranking-message--error" role="alert">{error}</p> : rankings.length === 0 ? <div className="ranking-empty"><strong>No judge scores are available yet.</strong><span>Rankings will appear after judges save their score sheets.</span></div> : <>
         <p className="ranking-summary">{String(rankings.length).padStart(2, "0")} teams ranked · {judgeSheetCount} {judgeSheetCount === 1 ? "judge sheet" : "judge sheets"} · Maximum total {scoreText(contestWeightTotal(criteria))}%</p>
         <div className="ranking-table-wrap"><table className="ranking-table"><thead><tr><th>RANK</th><th>TEAM</th>{criteria.map((criterion, index) => <th key={`${criterion.criteria}-${index}`}><span>{criterion.criteria}</span><small>Max {scoreText(Number(criterion.weight) || 0)}%</small></th>)}<th>JUDGES</th><th>TOTAL</th></tr></thead><tbody>

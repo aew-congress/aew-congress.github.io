@@ -87,6 +87,8 @@ export type ContestMechanics = {
   criteria: ContestCriterion[];
   /** Teams configured for judging this specific contest. */
   teams?: ContestTeam[];
+  /** Controls whether verified admin accounts can view this contest's rankings. */
+  rankingsRevealed?: boolean;
   /** Optional contest instructions and rules stored as sanitized rich-text HTML. */
   mechanicsHtml?: string;
   createdAt?: unknown;

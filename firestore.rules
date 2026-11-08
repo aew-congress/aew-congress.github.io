@@ -109,7 +109,14 @@ service cloud.firestore {
 
     match /contestMechanics/{contestId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow create: if isSuperadmin()
+        || (isAdmin()
+          && (!('rankingsRevealed' in request.resource.data)
+            || request.resource.data.rankingsRevealed == false));
+      allow delete: if isAdmin();
+      allow update: if isSuperadmin()
+        || (isAdmin()
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['rankingsRevealed']));
     }
 
     match /contestJoins/{joinId} {
@@ -131,8 +138,13 @@ service cloud.firestore {
     }
 
     match /contestScoreSheets/{contestId}/judges/{judgeUid} {
-      allow get: if isSuperadmin() || (isDesignatedJudge() && judgeUid == request.auth.uid);
-      allow list: if isSuperadmin();
+      allow get: if isSuperadmin()
+        || (isAdmin()
+          && get(/databases/$(database)/documents/contestMechanics/$(contestId)).data.rankingsRevealed == true)
+        || (isDesignatedJudge() && judgeUid == request.auth.uid);
+      allow list: if isSuperadmin()
+        || (isAdmin()
+          && get(/databases/$(database)/documents/contestMechanics/$(contestId)).data.rankingsRevealed == true);
       allow create, update: if isDesignatedJudge()
         && judgeUid == request.auth.uid
         && exists(/databases/$(database)/documents/contestMechanics/$(contestId))

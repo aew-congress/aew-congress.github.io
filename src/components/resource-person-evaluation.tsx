@@ -274,8 +274,8 @@ export function ResourcePersonEvaluationPage({ programs, speakers, onToggleRateV
       <div className="section-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>RP <span>Evaluation</span></h2><p>Review and print submitted Resource Person Evaluation forms by program.</p></div></div>
       {error && <p className="rp-evaluation-error" role="alert">{error}</p>}
       <div className="approval-panel rp-evaluation-panel">
-        <div className="panel-heading"><div><span className="eyebrow">RESOURCE PERSON EVALUATIONS</span><h2>Program Forms</h2><p>Choose a keynote session to filter the forms included in Print.</p></div></div>
-        <div className="approval-table-wrap"><table className="approval-table rp-evaluation-program-table"><thead><tr><th>PROGRAM</th><th>DATE</th><th>VENUE</th><th>SESSION</th><th>PRINT</th></tr></thead><tbody>
+        <div className="panel-heading"><div><span className="eyebrow">RESOURCE PERSON EVALUATIONS</span><h2>RP Evaluation</h2><p>Choose a keynote session to filter the forms included in Print.</p></div></div>
+        <div className="approval-table-wrap"><table className="approval-table rp-evaluation-program-table"><thead><tr><th>PROGRAM</th><th>DATE</th><th>VENUE</th><th>SESSION</th><th>ACTIONS</th></tr></thead><tbody>
           {sortedPrograms.map((program) => {
             const selectedSession = sessionFilters[program.id] ?? "";
             const programEvaluations = evaluations.filter((evaluation) => evaluation.programId === program.id);

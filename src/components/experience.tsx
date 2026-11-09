@@ -23,7 +23,7 @@ import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 import { ProgramEvaluationMasterlistModal, ProgramEvaluationModal } from "@/components/program-evaluation";
 import { ResourcePersonEvaluationPage, ResourcePersonRatingModal } from "@/components/resource-person-evaluation";
 
-type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees" | "rpEvaluation";
+type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees" | "csm" | "rpEvaluation";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const START_ACCESS_CODE = "aew2026";
@@ -1243,7 +1243,6 @@ export default function Experience() {
     try {
       await getVerifiedAdmin();
       await updateDoc(doc(db, "programs", program.id), { evaluationRevealed, updatedAt: serverTimestamp() });
-      setEvaluationMasterlistProgram((current) => current?.id === program.id ? { ...current, evaluationRevealed } : current);
       setToast({ kind: "success", text: evaluationRevealed ? `Evaluate is now visible for ${program.eventTitle}.` : `Evaluate is now hidden for ${program.eventTitle}.` });
     } catch (error) { showError(error); }
   }
@@ -1655,6 +1654,7 @@ export default function Experience() {
     { id: "speakers", label: "People" },
     { id: "manage", label: "Manage Content" },
     { id: "confirmedAttendees", label: "Confirmed Attendees" },
+    { id: "csm", label: "CSM" },
     { id: "rpEvaluation", label: "RP Evaluation" },
     ...(isSuperadmin ? [{ id: "approval" as Section, label: "User Approval" }] : []),
   ];
@@ -1697,14 +1697,16 @@ export default function Experience() {
         {section === "approval" && isSuperadmin ? (
           <ApprovalDashboard profiles={profiles} loading={loading} onChangeRole={changeRole} onChangeJudge={changeJudge} onChangeStatus={changeStatus} onAddProgram={() => openProgramEditor()} onAddMaterial={() => openMaterialEditor()} />
         ) : section === "manage" && isAdmin ? (
-          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onViewEvaluations={setEvaluationMasterlistProgram} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
+          <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
+        ) : section === "csm" && isAdmin ? (
+          <CsmDirectoryPage programs={programs} onViewEvaluations={setEvaluationMasterlistProgram} onToggleVisibility={toggleProgramEvaluationVisibility} />
         ) : section === "rpEvaluation" && isAdmin ? (
           <ResourcePersonEvaluationPage programs={programs} speakers={speakers} onToggleRateVisibility={toggleResourcePersonRateVisibility} />
         ) : section === "contestMechanics" && isAdmin ? (
           <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} isSuperadmin={isSuperadmin} onToggleRankingVisibility={toggleContestRankingVisibility} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onSaveTeams={saveContestTeams} />
-        ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
+        ) : section === "contests" && (isAdmin || isApprovedMember || guestAccess || canJudgeContests) ? (
           <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
           <SpeakersPage speakers={speakers} programs={programs} contestMechanics={contestMechanics} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} onRate={openResourcePersonRating} ratedSpeakerIds={ratedResourcePersonIds} ratedStatusesLoading={ratedResourcePersonsLoading} />
@@ -1776,7 +1778,7 @@ export default function Experience() {
 
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
       {evaluationProgram && evaluationRespondentUid && <ProgramEvaluationModal key={`${evaluationProgram.id}:${evaluationRespondentUid}`} program={evaluationProgram} respondentUid={evaluationRespondentUid} respondentKind={isRegularMember ? "member" : "guest"} onClose={() => setEvaluationProgram(null)} onSubmitted={() => { setEvaluationStatus({ key: evaluationKey, submitted: true, loading: false }); setEvaluationProgram(null); setToast({ kind: "success", text: "Salamat sa imong feedback. Na-submit na ang evaluation." }); }} />}
-      {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} canManageVisibility={isAdmin} onToggleVisibility={toggleProgramEvaluationVisibility} onClose={() => setEvaluationMasterlistProgram(null)} />}
+      {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} onClose={() => setEvaluationMasterlistProgram(null)} />}
       {resourcePersonToRate && <ResourcePersonRatingModal key={`${resourcePersonToRate.id}:${resourcePersonRespondentUid}`} speaker={resourcePersonToRate} programs={programs} respondentUid={resourcePersonRespondentUid} respondentKind={isAdmin || isRegularMember ? "member" : "guest"} profile={activeProfile} onClose={() => setResourcePersonToRate(null)} onSubmitted={(speakerId) => { setRatedResourcePersonIds((current) => new Set(current).add(speakerId)); setResourcePersonToRate(null); setToast({ kind: "success", text: guestAccess ? "Thank you. To rate again, exit guest access and enter the access code again." : "Thank you. Your Resource Person Evaluation has been submitted." }); }} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
@@ -2295,15 +2297,37 @@ function ConfirmedAttendeesPage({ programs, selectedProgramId, onSelectProgram, 
   </div>;
 }
 
-function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onViewEvaluations, onAddMaterial, onEditMaterial, onDeleteMaterial, onToggleMaterialVisibility, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
+function CsmDirectoryPage({ programs, onViewEvaluations, onToggleVisibility }: { programs: Program[]; onViewEvaluations: (program: Program) => void; onToggleVisibility: (program: Program) => Promise<void> }) {
+  const [updatingProgramId, setUpdatingProgramId] = useState("");
+  const sortedPrograms = [...programs].sort((a, b) => a.dateFrom.localeCompare(b.dateFrom) || a.eventTitle.localeCompare(b.eventTitle));
+  async function toggleVisibility(program: Program) {
+    if (updatingProgramId) return;
+    setUpdatingProgramId(program.id);
+    try { await onToggleVisibility(program); }
+    finally { setUpdatingProgramId(""); }
+  }
+  return <section className="content-wrap dashboard-page csm-page">
+    <div className="section-heading"><div><span className="eyebrow">ADMIN WORKSPACE</span><h2>CSM <span>Responses</span></h2><p>Review Client Satisfaction Measurement responses by program.</p></div></div>
+    <div className="approval-panel csm-panel">
+      <div className="panel-heading"><div><span className="eyebrow">CLIENT SATISFACTION MEASUREMENT</span><h2>CSM Masterlists</h2><p>Open a program to search and review submitted CSM forms.</p></div></div>
+      <div className="approval-table-wrap"><table className="approval-table csm-program-table"><thead><tr><th>PROGRAM</th><th>DATE</th><th>VENUE</th><th>ACTIONS</th></tr></thead><tbody>
+        {sortedPrograms.map((program) => <tr key={program.id}><td><strong className="table-primary">{program.eventTitle}</strong></td><td>{dateRange(program.dateFrom, program.dateTo)}</td><td>{program.venue}</td><td><div className="csm-program-actions"><button type="button" className={`button button--soft csm-visibility-button${program.evaluationRevealed === true ? " csm-visibility-button--active" : ""}`} disabled={Boolean(updatingProgramId)} aria-pressed={program.evaluationRevealed === true} onClick={() => void toggleVisibility(program)}>{program.evaluationRevealed === true ? <EyeOff size={15} /> : <Eye size={15} />}{program.evaluationRevealed === true ? "Unreveal CSM" : "Reveal CSM"}</button><button type="button" className="button button--soft csm-masterlist-button" onClick={() => onViewEvaluations(program)}><FileSearch size={15} />Masterlist</button></div></td></tr>)}
+        {!sortedPrograms.length && <tr><td colSpan={4} className="empty-table">No saved programs are available.</td></tr>}
+      </tbody></table></div>
+      <div className="table-footnote"><span>{sortedPrograms.length} {sortedPrograms.length === 1 ? "program" : "programs"}</span></div>
+    </div>
+  </section>;
+}
+
+function ManageDashboard({ programs, materials, mechanics, onAddProgram, onEditProgram, onDeleteProgram, onAddMaterial, onEditMaterial, onDeleteMaterial, onToggleMaterialVisibility, onAddMechanics, onEditMechanics, onDeleteMechanics, backLabel, onBack }: {
   programs: Program[]; materials: Material[]; mechanics: ContestMechanics[];
-  onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void; onViewEvaluations: (program: Program) => void;
+  onAddProgram: () => void; onEditProgram: (program: Program) => void; onDeleteProgram: (program: Program) => void;
   onAddMaterial: () => void; onEditMaterial: (material: Material) => void; onDeleteMaterial: (material: Material) => void; onToggleMaterialVisibility: (material: Material) => void;
   onAddMechanics: () => void; onEditMechanics: (mechanics: ContestMechanics) => void; onDeleteMechanics: (mechanics: ContestMechanics) => void; backLabel: string; onBack: () => void;
 }) {
-  const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }, onView?: () => void) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}{onView && <button type="button" className="manage-action-button" aria-label={`View evaluations for ${label}`} title="View evaluation masterlist" onClick={onView}><FileSearch size={15} /></button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
+  const actions = (label: string, onEdit: () => void, onDelete: () => void, visibility?: { enabled: boolean; onToggle: () => void }) => <div className="manage-row-actions"><button className="manage-action-button" aria-label={`Edit ${label}`} title="Edit" onClick={onEdit}><Pencil size={15} /></button>{visibility && <button type="button" className={`manage-action-button ${visibility.enabled ? "manage-action-button--visible" : "manage-action-button--hidden"}`} aria-label={visibility.enabled ? `Hide ${label} from regular users` : `Show ${label} to regular users`} aria-pressed={visibility.enabled} title={visibility.enabled ? "Visible to regular users — click to hide" : "Hidden from regular users — click to show"} onClick={visibility.onToggle}>{visibility.enabled ? <Eye size={15} /> : <EyeOff size={15} />}</button>}<button className="manage-action-button manage-action-button--delete" aria-label={`Delete ${label}`} title="Delete" onClick={onDelete}><Trash2 size={15} /></button></div>;
   return <div className="content-wrap dashboard-page"><button className="back-link" onClick={onBack}><ChevronLeft size={16} /> {backLabel}</button><div className="section-heading"><div><span className="eyebrow">ADMIN CONTENT MANAGEMENT</span><h2>Manage <span>content</span></h2><p>Create, review, edit, and remove programs, contests, and materials.</p></div></div><div className="manage-grid">
-    <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program), undefined, () => onViewEvaluations(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
+    <div className="manage-card"><div className="manage-card-heading"><div><CalendarDays size={18} /><h3>Programs</h3></div><button className="button button--soft" onClick={onAddProgram}><Plus size={15} /> Add</button></div>{programs.map((program) => <div className="manage-row" key={program.id}><div><strong>{program.eventTitle}</strong><small>{dateRange(program.dateFrom, program.dateTo)} · {program.venue}</small>{program.theme && <small>{program.theme}</small>}</div><span>{program.flow.length} sessions</span>{actions(program.eventTitle, () => onEditProgram(program), () => onDeleteProgram(program))}</div>)}{!programs.length && <p className="manage-empty">No programs have been published yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileText size={18} /><h3>Contest Criteria</h3></div><button className="button button--soft" onClick={onAddMechanics}><Plus size={15} /> Add</button></div>{mechanics.map((item) => <div className="manage-row" key={item.id}><div><strong>{item.contest}</strong><small>{item.eventTitle} · {item.criteria?.length ?? 0} criteria</small></div><span>{contestWeightTotal(item.criteria)}%</span>{actions(item.contest, () => onEditMechanics(item), () => onDeleteMechanics(item))}</div>)}{!mechanics.length && <p className="manage-empty">No contest criteria have been added yet.</p>}</div>
     <div className="manage-card"><div className="manage-card-heading"><div><FileCheck2 size={18} /><h3>Materials</h3></div><button className="button button--soft" onClick={onAddMaterial}><Plus size={15} /> Add</button></div>{materials.map((material) => <div className="manage-row" key={material.id}><div><strong>{material.name}</strong><small>{material.programTitle} · {material.category}</small></div><a href={material.url} target="_blank" rel="noreferrer" aria-label={`Open ${material.name}`}><ArrowUpRight size={15} /></a>{actions(material.name, () => onEditMaterial(material), () => onDeleteMaterial(material), { enabled: material.enabled !== false, onToggle: () => onToggleMaterialVisibility(material) })}</div>)}{!materials.length && <p className="manage-empty">The resource library is ready for its first upload.</p>}</div>
   </div></div>;

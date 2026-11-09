@@ -397,6 +397,7 @@ export default function Experience() {
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
   const [startAccessOpen, setStartAccessOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [programModal, setProgramModal] = useState(false);
   const [contestMechanicsModal, setContestMechanicsModal] = useState(false);
@@ -429,6 +430,9 @@ export default function Experience() {
   const isDesignatedJudge = activeProfile?.judge === "Yes" || profiles.some((profile) => profile.uid === user?.uid && profile.judge === "Yes");
   const canJudgeContests = Boolean(user?.emailVerified && isDesignatedJudge && (isAdmin || isRegularMember));
   const signedIn = isAdmin || isApprovedMember || guestAccess;
+  const signedInDisplayName = guestAccess
+    ? "Masaganang Agrikultura!"
+    : activeProfile?.firstName?.trim() || user?.displayName?.trim().split(/\s+/)[0] || (isAdmin ? "Admin" : "Account");
   const currentYear = philippineCurrentYear();
   const currentYearProgram = useMemo(() => {
     const thisYearPrograms = programs.filter((program) => Number(program.dateFrom?.slice(0, 4)) === currentYear);
@@ -1599,14 +1603,18 @@ export default function Experience() {
   }
 
   const navItems: { id: Section; label: string }[] = [
-    ...(isApprovedMember || guestAccess ? [{ id: "programs" as Section, label: "Programs" }] : []),
-    ...(isApprovedMember || guestAccess || canJudgeContests ? [{ id: "contests" as Section, label: "Contest" }] : []),
-    ...(isAdmin ? [{ id: "contestMechanics" as Section, label: "Contest Criteria" }] : []),
-    ...(isAdmin ? [{ id: "speakers" as Section, label: "People" }] : signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
-    ...(isAdmin ? [{ id: "manage" as Section, label: "Manage Content" }] : []),
-    ...(isAdmin ? [{ id: "confirmedAttendees" as Section, label: "Confirmed Attendees" }] : []),
+    ...(isAdmin || isApprovedMember || guestAccess ? [{ id: "programs" as Section, label: "Programs" }] : []),
+    ...(isAdmin || isApprovedMember || guestAccess || canJudgeContests ? [{ id: "contests" as Section, label: "Contest" }] : []),
+    ...(signedIn ? [{ id: "materials" as Section, label: "Resources" }] : []),
+  ];
+  const adminNavItems: { id: Section; label: string }[] = [
+    { id: "contestMechanics", label: "Contest Criteria" },
+    { id: "speakers", label: "People" },
+    { id: "manage", label: "Manage Content" },
+    { id: "confirmedAttendees", label: "Confirmed Attendees" },
     ...(isSuperadmin ? [{ id: "approval" as Section, label: "User Approval" }] : []),
   ];
+  const isAdminNavActive = adminNavItems.some((item) => item.id === section);
 
   return (
     <>
@@ -1626,12 +1634,18 @@ export default function Experience() {
           <span className="brand-mark"><img src="/AEW_logo_1_white.png" alt="" /></span>
           <span className="brand-wording"><strong>AEW <em>CONGRESS</em></strong><small>CARAGA REGION</small></span>
         </a>
-        {signedIn && <nav className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
-          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((p) => p.emailVerified === true && p.status === "Pending").length}</span>}</button>)}
+        {signedIn && <nav id="primary-navigation" className={`primary-nav ${mobileMenuOpen ? "primary-nav--open" : ""}`} aria-label="Primary navigation">
+          {navItems.map((item) => <button key={item.id} className={section === item.id ? "nav-link nav-link--active" : "nav-link"} onClick={() => { setSection(item.id); setAdminMenuOpen(false); setMobileMenuOpen(false); }}>{item.label}</button>)}
+          {isAdmin && <div className="admin-nav-dropdown" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAdminMenuOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") setAdminMenuOpen(false); }}>
+            <button type="button" className={`nav-link admin-nav-trigger${isAdminNavActive ? " nav-link--active" : ""}`} aria-haspopup="true" aria-expanded={adminMenuOpen} aria-controls="admin-nav-menu" onClick={() => setAdminMenuOpen((open) => !open)}>Admin <ChevronDown size={14} aria-hidden="true" className={adminMenuOpen ? "admin-nav-chevron is-open" : "admin-nav-chevron"} /></button>
+            <div className={`admin-nav-menu${adminMenuOpen ? " admin-nav-menu--open" : ""}`} id="admin-nav-menu" role="group" aria-label="Admin navigation" aria-hidden={!adminMenuOpen}>
+              {adminNavItems.map((item) => <button key={item.id} type="button" className={section === item.id ? "admin-nav-item admin-nav-item--active" : "admin-nav-item"} onClick={() => { setSection(item.id); setAdminMenuOpen(false); setMobileMenuOpen(false); }}>{item.label}{item.id === "approval" && profiles.filter((profile) => profile.emailVerified === true && profile.status === "Pending").length > 0 && <span className="nav-count">{profiles.filter((profile) => profile.emailVerified === true && profile.status === "Pending").length}</span>}</button>)}
+            </div>
+          </div>}
         </nav>}
         <div className="topbar-actions">
-          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{guestAccess ? "Masaganang Agrikultura!" : isSuperadmin ? "Superadmin" : isAdmin ? "Admin" : activeProfile?.firstName}</span><IconButton label={guestAccess ? "Exit guest access" : "Sign out"} onClick={guestAccess ? exitGuestAccess : logout}><LogOut size={18} /></IconButton></> : <><button className="start-access-button" onClick={() => setStartAccessOpen(true)}>Start</button><button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button></>}
-          {signedIn && <button className="mobile-menu-button" aria-label="Toggle navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>}
+          {signedIn ? <><span className="signed-in-label"><span className="online-dot" />{signedInDisplayName}</span><IconButton label={guestAccess ? "Exit guest access" : "Sign out"} onClick={guestAccess ? exitGuestAccess : logout}><LogOut size={18} /></IconButton></> : <><button className="start-access-button" onClick={() => setStartAccessOpen(true)}>Start</button><button className="login-link" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}><span>Log in</span><span className="login-icon"><UserRound size={17} /></span></button></>}
+          {signedIn && <button className="mobile-menu-button" aria-label="Toggle navigation" aria-expanded={mobileMenuOpen} aria-controls="primary-navigation" onClick={() => { setMobileMenuOpen((open) => !open); setAdminMenuOpen(false); }}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>}
         </div>
       </header>
 

@@ -193,17 +193,21 @@ export type Material = {
 
 export type SpeakerAffiliation = { position: string; organization: string };
 export type SpeakerKeynoteSession = { date: string; session: string };
-export type SpeakerProfileCard = {
+export type PersonType = "Speaker" | "Judge";
+export type PersonProfileCard = {
   id: string;
   programId: string;
   imageUrl: string;
   imageKey: string;
+  /** Older directory records without a type are treated as speakers. */
+  type?: PersonType;
   name: string;
   postNominal?: string;
   designation: string;
   office: string;
   affiliations: SpeakerAffiliation[];
-  topics: string[];
+  topics?: string[];
+  contests?: string[];
   keynoteSessions?: SpeakerKeynoteSession[];
   createdAt?: unknown;
   createdBy?: string;

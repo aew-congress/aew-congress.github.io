@@ -2,6 +2,7 @@ import { createRouteHandler, createUploadthing, UploadThingError } from "uploadt
 
 const allowedOrigins = new Set([
   "https://aew-congress.github.io",
+  "https://aew-caraga.web.app",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ]);

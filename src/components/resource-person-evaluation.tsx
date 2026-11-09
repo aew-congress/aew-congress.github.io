@@ -152,6 +152,7 @@ export function ResourcePersonRatingModal({ speaker, programs, respondentUid, re
           <label className="evaluation-field"><span className="evaluation-field-label">Participant’s / Respondent’s Agency / Division / Unit</span><input name="respondentAgency" maxLength={240} required disabled={saving || alreadySubmitted} /></label>
         </div>}
         <label className="evaluation-field rp-program-field"><span className="evaluation-field-label">Program</span><select name="programId" value={programId} onChange={(event) => setProgramId(event.target.value)} required disabled={saving || alreadySubmitted || !programs.length}><option value="" disabled>Select a saved program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle}</option>)}</select></label>
+        <p className="rp-rating-instruction">Please rate each criterion on a progressive scale of 1 to 5 (1-Poor; 2-Unsatisfactory; 3- Satisfactory; 4-Very Satisfactory; 5-Outstanding) by encircling the number you preferred:</p>
         <p className="rp-hidden-info" aria-hidden="true">Respondent, activity date and venue, speaker, and session are added automatically to the evaluation record.</p>
         <div className="rp-rating-list">
           {ratingQuestions.map((question, index) => <fieldset className="rp-rating-question" key={question}>

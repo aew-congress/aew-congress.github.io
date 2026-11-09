@@ -984,6 +984,7 @@ img { -webkit-user-drag: none; user-select: none; }
 .rp-evaluation-modal { width: 100%; }
 .rp-respondent-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(110px, .55fr) minmax(200px, 1.3fr); gap: 11px; margin-bottom: 13px; }
 .rp-program-field { margin-bottom: 12px; }
+.rp-rating-instruction { margin: -4px 0 12px; color: #899082; font-size: 11px; line-height: 1.5; }
 .rp-hidden-info { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .rp-rating-list { display: grid; gap: 8px; }
 .rp-rating-question { min-width: 0; margin: 0; padding: 11px 12px; border: 1px solid #e8ebe3; border-radius: 9px; background: #fff; }

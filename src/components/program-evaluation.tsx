@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
-import { ArrowRight, Check, Search, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { collection, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { ArrowRight, Check, Printer, Search, X } from "lucide-react";
 import { db, Program, ProgramEvaluation } from "@/lib/firebase";
 
 const clientTypes = ["Lungsuranon (citizen)", "Negasyo", "Gobyerno (empleyado o sa ubang ahensya)"];
@@ -363,6 +364,175 @@ function displayBirthdate(value: string) {
   if (!value) return "—";
   const date = new Date(`${value}T12:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-PH", { month: "2-digit", day: "2-digit", year: "numeric" });
+}
+
+const csmTemplateWidth = 1241;
+const csmTemplateHeight = 1754;
+const csmRatingColumnCenters = [719, 823, 926, 1032, 1134];
+const csmRatingRowCenters = [1178, 1216, 1255, 1299, 1347, 1398, 1444, 1484, 1525, 1566];
+
+function csmPrintDate(value: string) {
+  if (!value) return "";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function csmPrintDateRange(program: Program) {
+  const from = csmPrintDate(program.dateFrom);
+  const to = csmPrintDate(program.dateTo);
+  if (!from) return to;
+  if (!to || program.dateFrom === program.dateTo) return from;
+  return `${from} – ${to}`;
+}
+
+function csmSelectedIndex(value: unknown, choices: string[]) {
+  const selected = String(value ?? "").trim().toLocaleLowerCase();
+  if (!selected) return -1;
+  const exactIndex = choices.findIndex((choice) => choice.toLocaleLowerCase() === selected);
+  if (exactIndex >= 0) return exactIndex;
+  const prefix = selected.match(/^(\d+)/)?.[1];
+  if (prefix) {
+    const index = Number(prefix) - 1;
+    if (index >= 0 && index < choices.length) return index;
+  }
+  return choices.findIndex((choice) => selected.includes(choice.toLocaleLowerCase()));
+}
+
+function CsmPrintField({ x, y, width, height = 18, value, fontSize = 5.7, align = "left", multiline = false }: {
+  x: number; y: number; width: number; height?: number; value: unknown; fontSize?: number; align?: "left" | "center" | "right"; multiline?: boolean;
+}) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  return <span className={`csm-print-field${multiline ? " csm-print-field--multiline" : ""}`} style={{ left: `${x / csmTemplateWidth * 100}%`, top: `${y / csmTemplateHeight * 100}%`, width: `${width / csmTemplateWidth * 100}%`, height: `${height / csmTemplateHeight * 100}%`, fontSize: `${fontSize}pt`, textAlign: align }}>{text}</span>;
+}
+
+function CsmPrintMark({ x, y, size = 18, fontSize = 9 }: { x: number; y: number; size?: number; fontSize?: number }) {
+  return <span className="csm-print-mark" style={{ left: `${(x - size / 2) / csmTemplateWidth * 100}%`, top: `${(y - size / 2) / csmTemplateHeight * 100}%`, width: `${size / csmTemplateWidth * 100}%`, height: `${size / csmTemplateHeight * 100}%`, fontSize: `${fontSize}pt` }}>✓</span>;
+}
+
+function CsmPrintPage({ program, evaluation }: { program: Program; evaluation: ProgramEvaluation }) {
+  const clientTypeIndex = clientTypes.findIndex((choice) => choice.toLocaleLowerCase() === String(evaluation.clientType ?? "").trim().toLocaleLowerCase());
+  const isIndividual = evaluation.beneficiaryType === "Indibidwal";
+  const isGroup = evaluation.beneficiaryType === "Grupo";
+  const categories = isGroup ? groupBeneficiaries : individualBeneficiaries;
+  const beneficiaryIndex = categories.indexOf(evaluation.beneficiaryCategory ?? "");
+  const interventions = Array.isArray(evaluation.interventions) ? evaluation.interventions : [];
+  const birthdateParts = String(evaluation.birthdate ?? "").split("-");
+  const ratingValues = [evaluation.overallSatisfaction, ...Array.from({ length: 8 }, (_, index) => evaluation.qualityScores?.[index] ?? ""), evaluation.deliveryScore];
+  const checks: Array<{ active: boolean; x: number; y: number }> = [];
+  if (clientTypeIndex >= 0) checks.push({ active: true, x: [215, 374, 475][clientTypeIndex], y: 302 });
+  if (isIndividual) checks.push({ active: true, x: 105, y: 344 });
+  if (isGroup) checks.push({ active: true, x: 105, y: 372 });
+  if (beneficiaryIndex >= 0) {
+    const positions = isGroup
+      ? [{ x: 514, y: 372 }, { x: 653, y: 372 }, { x: 761, y: 372 }, { x: 860, y: 372 }, { x: 965, y: 372 }]
+      : [{ x: 514, y: 344 }, { x: 653, y: 344 }, { x: 761, y: 344 }, { x: 860, y: 344 }];
+    if (positions[beneficiaryIndex]) checks.push({ active: true, ...positions[beneficiaryIndex] });
+  }
+  if (evaluation.sex === "Lalaki") checks.push({ active: true, x: 371, y: 594 });
+  if (evaluation.sex === "Babae") checks.push({ active: true, x: 513, y: 594 });
+  const memberships = ["ARB", "IP's", "PWD", "4P's"];
+  const membershipIndex = memberships.findIndex((membership) => membership.toLocaleLowerCase() === String(evaluation.membership ?? "").trim().toLocaleLowerCase());
+  if (membershipIndex >= 0) checks.push({ active: true, x: [375, 515, 653, 761][membershipIndex], y: 637 });
+  const interventionXs = [117, 350, 449, 674, 853, 1070];
+  receivedServices.forEach((service, index) => {
+    if (interventions.includes(service)) checks.push({ active: true, x: interventionXs[index], y: 709 });
+  });
+  const cc1Index = csmSelectedIndex(evaluation.cc1, cc1Choices);
+  const cc1Positions = [{ x: 117, y: 844 }, { x: 117, y: 870 }, { x: 674, y: 844 }, { x: 674, y: 870 }];
+  if (cc1Positions[cc1Index]) checks.push({ active: true, ...cc1Positions[cc1Index] });
+  const cc2Index = csmSelectedIndex(evaluation.cc2, cc2Choices);
+  const cc2Xs = [117, 350, 653, 855, 1072];
+  if (cc2Xs[cc2Index] !== undefined) checks.push({ active: true, x: cc2Xs[cc2Index], y: 918 });
+  const cc3Index = csmSelectedIndex(evaluation.cc3, cc3Choices);
+  const cc3Xs = [117, 350, 653, 855];
+  if (cc3Xs[cc3Index] !== undefined) checks.push({ active: true, x: cc3Xs[cc3Index], y: 965 });
+
+  return <article className="csm-print-page">
+    <img className="csm-print-template" src="/csm_template.jpg" alt="" />
+    <div className="csm-print-overlay">
+      <CsmPrintField x={365} y={29} width={830} height={16} fontSize={5.2} align="right" value={`PROGRAM: ${program.eventTitle}  |  DATE: ${csmPrintDateRange(program)}  |  VENUE: ${program.venue}`} />
+      <CsmPrintField x={332} y={420} width={414} value={evaluation.registrationId} />
+      <CsmPrintField x={923} y={420} width={258} value={evaluation.contactNo} />
+      <CsmPrintField x={332} y={458} width={846} value={evaluation.groupName} />
+      <CsmPrintField x={362} y={493} width={164} value={evaluation.firstName} />
+      <CsmPrintField x={540} y={493} width={172} value={evaluation.middleName} />
+      <CsmPrintField x={728} y={493} width={250} value={evaluation.lastName} />
+      <CsmPrintField x={1004} y={493} width={174} value={evaluation.suffix} />
+      <CsmPrintField x={361} y={541} width={158} value={evaluation.region} />
+      <CsmPrintField x={526} y={541} width={156} value={evaluation.province} />
+      <CsmPrintField x={692} y={541} width={169} value={evaluation.cityMunicipality} />
+      <CsmPrintField x={870} y={541} width={150} value={evaluation.barangay} />
+      <CsmPrintField x={1027} y={541} width={151} value={evaluation.street} />
+      <CsmPrintField x={899} y={582} width={52} value={birthdateParts[1]} align="center" />
+      <CsmPrintField x={953} y={582} width={51} value={birthdateParts[2]} align="center" />
+      <CsmPrintField x={1007} y={582} width={78} value={birthdateParts[0]} align="center" />
+      {evaluation.beneficiaryCategory === "Uban pa" && <CsmPrintField x={1063} y={359} width={115} height={16} fontSize={5} value={evaluation.beneficiaryOther} />}
+      {interventions.includes("Uban pa") && <>
+        <CsmPrintField x={1072} y={730} width={105} height={17} value={evaluation.interventionOtherQuantity} />
+        <CsmPrintField x={510} y={730} width={669} height={17} value={evaluation.interventionOtherDetail} />
+      </>}
+      {csmRatingRowCenters.map((rowY, rowIndex) => {
+        const columnIndex = csmSelectedIndex(ratingValues[rowIndex], agreementChoices);
+        return columnIndex < 0 ? null : <CsmPrintMark key={`rating-${rowIndex}`} x={csmRatingColumnCenters[columnIndex]} y={rowY} size={22} fontSize={10} />;
+      })}
+      <CsmPrintField x={58} y={1594} width={1124} height={124} fontSize={6.2} multiline value={evaluation.suggestions} />
+      {checks.filter((check) => check.active).map((check, index) => <CsmPrintMark key={`check-${index}`} x={check.x} y={check.y} />)}
+    </div>
+  </article>;
+}
+
+export function CsmEvaluationPrintButton({ program }: { program: Program }) {
+  const [printing, setPrinting] = useState(false);
+  const [printEvaluations, setPrintEvaluations] = useState<ProgramEvaluation[] | null>(null);
+  const [notice, setNotice] = useState("");
+
+  async function preparePrint() {
+    if (printing || printEvaluations) return;
+    setPrinting(true);
+    setNotice("");
+    try {
+      const snapshot = await getDocs(collection(db, "programEvaluations", program.id, "responses"));
+      const submitted = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ProgramEvaluation));
+      if (!submitted.length) {
+        setNotice("No submitted forms");
+        return;
+      }
+      setPrintEvaluations(submitted);
+    } catch {
+      setNotice("Could not load forms");
+    } finally {
+      setPrinting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!printEvaluations) return;
+    let cancelled = false;
+    const pageStyle = document.createElement("style");
+    pageStyle.media = "print";
+    pageStyle.textContent = "@page { size: A4 portrait; margin: 0; }";
+    document.head.appendChild(pageStyle);
+    const afterPrint = () => setPrintEvaluations(null);
+    window.addEventListener("afterprint", afterPrint, { once: true });
+    const templates = Array.from(document.querySelectorAll<HTMLImageElement>(".csm-print-template"));
+    void Promise.all(templates.map((image) => image.decode().catch(() => undefined))).then(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    })).then(() => {
+      if (!cancelled) window.print();
+    });
+    return () => {
+      cancelled = true;
+      pageStyle.remove();
+      window.removeEventListener("afterprint", afterPrint);
+    };
+  }, [printEvaluations]);
+
+  return <>
+    <button type="button" className="button button--soft csm-print-button" disabled={printing || Boolean(printEvaluations)} title={notice || "Print submitted CSM forms on A4 paper"} onClick={() => void preparePrint()}><Printer size={15} />{printing ? "Preparing…" : "Print"}</button>
+    {notice && <span className="csm-print-status" role="status">{notice}</span>}
+    {printEvaluations && typeof document !== "undefined" && createPortal(<div className="csm-print" aria-hidden="true">{printEvaluations.map((evaluation) => <CsmPrintPage key={evaluation.id} program={program} evaluation={evaluation} />)}</div>, document.body)}
+  </>;
 }
 
 export function ProgramEvaluationMasterlistModal({ program, onClose }: {

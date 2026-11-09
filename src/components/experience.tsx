@@ -1346,6 +1346,10 @@ export default function Experience() {
       setToast({ kind: "error", text: "Choose a contest date and start time." });
       return;
     }
+    if (contestDate < program.dateFrom || contestDate > program.dateTo) {
+      setToast({ kind: "error", text: `Choose a contest date between ${displayDate(program.dateFrom)} and ${displayDate(program.dateTo)}.` });
+      return;
+    }
     if (!contest || !criteria.length || criteria.some((row) => !row.criteria || !row.description || !Number.isFinite(row.weight) || row.weight < 0)) {
       setToast({ kind: "error", text: "Complete every criteria row and enter a non-negative weight for each." });
       return;
@@ -1643,7 +1647,7 @@ export default function Experience() {
         ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
           <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
-          <SpeakersPage speakers={speakers} programs={programs} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
+          <SpeakersPage speakers={speakers} programs={programs} contestMechanics={contestMechanics} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} isRegularMember={isRegularMember || guestAccess} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
@@ -1802,9 +1806,10 @@ function ProgramFilterDropdown({ id, programs, value, onChange, className = "", 
   </div>;
 }
 
-function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onDelete }: {
+function SpeakersPage({ speakers, programs, contestMechanics, isAdmin, loading, onAdd, onEdit, onDelete }: {
   speakers: PersonProfileCard[];
   programs: Program[];
+  contestMechanics: ContestMechanics[];
   isAdmin: boolean;
   loading: boolean;
   onAdd: () => void;
@@ -1815,54 +1820,62 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
   const [peopleType, setPeopleType] = useState<PersonType>("Speaker");
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [keynoteFilter, setKeynoteFilter] = useState("");
+  const [contestFilter, setContestFilter] = useState("");
   const programsById = new Map(programs.map((program) => [program.id, program]));
   const programPeople = useMemo(() => speakers.filter((person) => (!programFilter || person.programId === programFilter) && (person.type ?? "Speaker") === peopleType), [peopleType, programFilter, speakers]);
-  const speakerDays = useMemo(() => {
-    if (peopleType !== "Speaker") return [];
+  const peopleDays = useMemo(() => {
     const dateSet = new Set<string>();
     const matchingPrograms = programs.filter((program) => !programFilter || program.id === programFilter);
     matchingPrograms.forEach((program) => {
+      if (!program.dateFrom || !program.dateTo || program.dateTo < program.dateFrom) return;
       const first = new Date(`${program.dateFrom}T12:00:00`);
       const last = new Date(`${program.dateTo}T12:00:00`);
-      let dayCount = 0;
-      for (const day = new Date(first); day <= last && dayCount < 31; day.setDate(day.getDate() + 1), dayCount += 1) {
+      for (const day = new Date(first); day <= last; day.setDate(day.getDate() + 1)) {
         dateSet.add(day.toISOString().slice(0, 10));
       }
-      if (!dayCount && program.dateFrom) dateSet.add(program.dateFrom);
     });
-    programPeople.forEach((speaker) => (speaker.keynoteSessions ?? []).forEach((item) => {
-      if (item.date) dateSet.add(item.date);
-    }));
     return [...dateSet].sort();
-  }, [peopleType, programFilter, programPeople, programs]);
-  const selectedDate = selectedDayIndex >= 0 ? speakerDays[selectedDayIndex] ?? "" : "";
+  }, [programFilter, programs]);
+  const selectedDate = selectedDayIndex >= 0 ? peopleDays[selectedDayIndex] ?? "" : "";
   const savedKeynoteOptions = [...new Set(programPeople.flatMap((speaker) => (speaker.keynoteSessions ?? [])
     .map((item) => item.session.trim())
     .filter(Boolean)))].sort((a, b) => a.localeCompare(b));
+  const savedContestOptions = [...new Set(programPeople.flatMap((person) => person.contests ?? [])
+    .map((contest) => contest.trim())
+    .filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const displayed = programPeople.filter((speaker) => {
-    // Admins manage the full speaker directory; do not apply the hidden public day/session filters.
-    if (isAdmin || peopleType === "Judge") return true;
+    // Admins manage the full directory; public filters combine the program day with the selected session or contest.
+    if (isAdmin) return true;
+    if (peopleType === "Judge") {
+      if (!selectedDate && !contestFilter) return true;
+      const assignedContests = new Set((speaker.contests ?? []).map((contest) => contest.trim()));
+      return contestMechanics.some((contest) => contest.programId === speaker.programId
+        && (!selectedDate || contest.contestDate === selectedDate)
+        && (!contestFilter || contest.contest.trim() === contestFilter)
+        && assignedContests.has(contest.contest.trim()));
+    }
     const sessions = speaker.keynoteSessions ?? [];
     const matchesDay = !selectedDate || sessions.some((item) => item.date === selectedDate);
     const matchesKeynote = !keynoteFilter || sessions.some((item) => item.session === keynoteFilter && (!selectedDate || item.date === selectedDate));
     return matchesDay && matchesKeynote;
   });
-  const scheduleFilterActive = peopleType === "Speaker" && Boolean(selectedDate || keynoteFilter);
-  const visibleDayStart = Math.max(0, Math.min(Math.max(0, selectedDayIndex - 1), speakerDays.length - 3));
-  const visibleDays = speakerDays.slice(visibleDayStart, visibleDayStart + 3);
+  const scheduleFilterActive = Boolean(selectedDate || (peopleType === "Speaker" && keynoteFilter) || (peopleType === "Judge" && contestFilter));
+  const visibleDayStart = Math.max(0, Math.min(Math.max(0, selectedDayIndex - 1), peopleDays.length - 3));
+  const visibleDays = peopleDays.slice(visibleDayStart, visibleDayStart + 3);
 
   return <div className="content-wrap dashboard-page speakers-page">
     <div className="section-heading speakers-heading">
       <div><span className="eyebrow">LEARN · SHARE · GROW</span><h2>Know the <span>People</span></h2><p>Meet the people bringing practical knowledge to our programs.</p></div>
       <div className="speakers-controls">
-        <ProgramFilterDropdown id="speaker-program-filter" programs={programs} value={programFilter} onChange={(value) => { setProgramFilter(value); setSelectedDayIndex(0); setKeynoteFilter(""); }} />
-        <ProgramFilterDropdown id="people-type-filter" programs={[]} value={peopleType} onChange={(value) => { setPeopleType(value as PersonType); setSelectedDayIndex(0); setKeynoteFilter(""); }} label="People" allLabel="Speaker" choices={[{ id: "Speaker", label: "Speaker" }, { id: "Judge", label: "Judge" }]} hideAll className="people-type-filter" />
+        <ProgramFilterDropdown id="speaker-program-filter" programs={programs} value={programFilter} onChange={(value) => { setProgramFilter(value); setSelectedDayIndex(0); setKeynoteFilter(""); setContestFilter(""); }} />
+        <ProgramFilterDropdown id="people-type-filter" programs={[]} value={peopleType} onChange={(value) => { setPeopleType(value as PersonType); setSelectedDayIndex(0); setKeynoteFilter(""); setContestFilter(""); }} label="People" allLabel="Speaker" choices={[{ id: "Speaker", label: "Speaker" }, { id: "Judge", label: "Judge" }]} hideAll className="people-type-filter" />
         {isAdmin && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={16} /> Add People</button>}
       </div>
     </div>
-    {!isAdmin && peopleType === "Speaker" && <div className="speakers-secondary-filters">
-      <div className="speakers-day-filter"><span className="eyebrow">DAILY FILTER</span><div className="day-controls speakers-day-controls"><button className="day-arrow" aria-label="Previous speaker day" disabled={selectedDayIndex <= 0} onClick={() => setSelectedDayIndex((current) => Math.max(0, current - 1))}><ChevronLeft size={17} /></button><div className="day-tabs speakers-day-tabs">{visibleDays.map((day, index) => { const dayIndex = visibleDayStart + index; return <button key={day} className={selectedDayIndex === dayIndex ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDayIndex(dayIndex)}><span>DAY {String(dayIndex + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>; })}</div><button className="day-arrow" aria-label="Next speaker day" disabled={!speakerDays.length || selectedDayIndex >= speakerDays.length - 1} onClick={() => setSelectedDayIndex((current) => Math.min(speakerDays.length - 1, current + 1))}><ChevronRight size={17} /></button></div></div>
-      <ProgramFilterDropdown id="speaker-keynote-filter" programs={programs} value={keynoteFilter} label="Keynote Session" allLabel="All keynote sessions" choices={savedKeynoteOptions.map((session) => ({ id: session, label: session }))} className="speaker-keynote-filter" onChange={setKeynoteFilter} />
+    {!isAdmin && <div className="speakers-secondary-filters">
+      <div className="speakers-day-filter"><span className="eyebrow">DAILY FILTER</span><div className="day-controls speakers-day-controls"><button className="day-arrow" aria-label="Previous day" disabled={selectedDayIndex <= 0} onClick={() => setSelectedDayIndex((current) => Math.max(0, current - 1))}><ChevronLeft size={17} /></button><div className="day-tabs speakers-day-tabs">{visibleDays.map((day, index) => { const dayIndex = visibleDayStart + index; return <button key={day} className={selectedDayIndex === dayIndex ? "day-tab day-tab--active" : "day-tab"} onClick={() => setSelectedDayIndex(dayIndex)}><span>DAY {String(dayIndex + 1).padStart(2, "0")}</span><small>{displayDate(day, { month: "short", day: "numeric" })}</small></button>; })}</div><button className="day-arrow" aria-label="Next day" disabled={!peopleDays.length || selectedDayIndex >= peopleDays.length - 1} onClick={() => setSelectedDayIndex((current) => Math.min(peopleDays.length - 1, current + 1))}><ChevronRight size={17} /></button></div></div>
+      {peopleType === "Speaker" && <ProgramFilterDropdown id="speaker-keynote-filter" programs={programs} value={keynoteFilter} label="Keynote Session" allLabel="All keynote sessions" choices={savedKeynoteOptions.map((session) => ({ id: session, label: session }))} className="speaker-keynote-filter" onChange={setKeynoteFilter} />}
+      {peopleType === "Judge" && <ProgramFilterDropdown id="judge-contest-filter" programs={programs} value={contestFilter} label="Contest" allLabel="All contests" choices={savedContestOptions.map((contest) => ({ id: contest, label: contest }))} className="speaker-keynote-filter" onChange={setContestFilter} />}
     </div>}
     <div className="speakers-count-row"><span>{String(displayed.length).padStart(2, "0")} {peopleType.toLocaleUpperCase()}S</span><i /> <span>{programFilter ? programsById.get(programFilter)?.eventTitle : "CARAGA REGION XIII"}</span></div>
     <div className="speaker-card-grid">{displayed.map((speaker, index) => {
@@ -1880,7 +1893,7 @@ function SpeakersPage({ speakers, programs, isAdmin, loading, onAdd, onEdit, onD
         </div>
       </article>;
     })}</div>
-    {!displayed.length && <div className="speakers-empty"><span><UsersRound size={22} /></span><span className="eyebrow">A PLACE FOR EVERY VOICE</span><h2>{loading ? `Gathering ${peopleType.toLocaleLowerCase()} profiles…` : scheduleFilterActive ? `No ${peopleType.toLocaleLowerCase()}s match these filters.` : programFilter ? `No ${peopleType.toLocaleLowerCase()}s for this program yet` : `Meet the ${peopleType.toLocaleLowerCase()}s soon.`}</h2><p>{loading ? `Saved ${peopleType.toLocaleLowerCase()} profiles will appear here.` : scheduleFilterActive ? "Choose another day or keynote session, or clear a filter to see more speakers." : programFilter ? "Choose another program or check back when people are added." : "Profiles shared by the admin team will appear here."}</p>{isAdmin && !loading && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={15} /> Add the first person</button>}</div>}
+    {!displayed.length && <div className="speakers-empty"><span><UsersRound size={22} /></span><span className="eyebrow">A PLACE FOR EVERY VOICE</span><h2>{loading ? `Gathering ${peopleType.toLocaleLowerCase()} profiles…` : scheduleFilterActive ? `No ${peopleType.toLocaleLowerCase()}s match these filters.` : programFilter ? `No ${peopleType.toLocaleLowerCase()}s for this program yet` : `Meet the ${peopleType.toLocaleLowerCase()}s soon.`}</h2><p>{loading ? `Saved ${peopleType.toLocaleLowerCase()} profiles will appear here.` : scheduleFilterActive ? peopleType === "Judge" ? "Choose another day or contest, or clear a filter to see more judges." : "Choose another day or keynote session, or clear a filter to see more speakers." : programFilter ? "Choose another program or check back when people are added." : "Profiles shared by the admin team will appear here."}</p>{isAdmin && !loading && <button className="button button--olive" disabled={!programs.length} onClick={onAdd}><Plus size={15} /> Add the first person</button>}</div>}
   </div>;
 }
 
@@ -2788,15 +2801,18 @@ function ContestMechanicsRichTextEditor({ value, onChange }: { value: string; on
 function ContestMechanicsModal({ programs, initialMechanics, onClose, onCreate }: { programs: Program[]; initialMechanics: ContestMechanics | null; onClose: () => void; onCreate: (event: FormEvent<HTMLFormElement>) => void }) {
   const [criteriaRows, setCriteriaRows] = useState(() => initialMechanics?.criteria?.length ? initialMechanics.criteria.map((item) => ({ ...item, weight: String(item.weight) })) : [{ criteria: "", description: "", weight: "" }]);
   const [mechanicsHtml, setMechanicsHtml] = useState(initialMechanics?.mechanicsHtml ?? "");
+  const [selectedProgramId, setSelectedProgramId] = useState(initialMechanics?.programId ?? "");
+  const [contestDate, setContestDate] = useState(initialMechanics?.contestDate ?? "");
+  const selectedProgram = programs.find((program) => program.id === selectedProgramId);
   const updateCriteria = (index: number, field: "criteria" | "description" | "weight", value: string) => {
     setCriteriaRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   };
 
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="form-modal contest-editor" role="dialog" aria-modal="true" aria-label={initialMechanics ? "Edit contest criteria" : "Add contest criteria"}><div className="form-modal-head"><div><span className="eyebrow">CONTEST SETTINGS</span><h2>{initialMechanics ? "Edit contest criteria" : "Add contest criteria"}<span>.</span></h2><p>Set up the contest rubric. Add as many criteria rows as needed.</p></div><button className="modal-close modal-close--inline" onClick={onClose} aria-label="Close"><X size={19} /></button></div><form onSubmit={onCreate}>
     <div className="contest-schedule-fields">
-      <Field label="Program"><select name="programId" required defaultValue={initialMechanics?.programId ?? ""}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
+      <Field label="Program"><select name="programId" required value={selectedProgramId} onChange={(event) => { const nextProgramId = event.target.value; const nextProgram = programs.find((program) => program.id === nextProgramId); setSelectedProgramId(nextProgramId); if (!nextProgram || !contestDate || contestDate < nextProgram.dateFrom || contestDate > nextProgram.dateTo) setContestDate(""); }}><option value="" disabled>Select a published program</option>{programs.map((program) => <option key={program.id} value={program.id}>{program.eventTitle} · {dateRange(program.dateFrom, program.dateTo)} · {program.venue}</option>)}</select></Field>
       <Field label="Contest"><input name="contest" defaultValue={initialMechanics?.contest ?? ""} placeholder="e.g. Agri-innovation showcase" required /></Field>
-      <Field label="Contest Date"><input type="date" name="contestDate" defaultValue={initialMechanics?.contestDate ?? ""} required /></Field>
+      <Field label="Contest Date"><input type="date" name="contestDate" value={contestDate} min={selectedProgram?.dateFrom} max={selectedProgram?.dateTo} onChange={(event) => setContestDate(event.target.value)} required /></Field>
       <Field label="Time Start"><input type="time" name="timeStart" defaultValue={initialMechanics?.timeStart ?? ""} required /></Field>
     </div>
     <input type="hidden" name="criteriaRows" value={JSON.stringify(criteriaRows)} readOnly />

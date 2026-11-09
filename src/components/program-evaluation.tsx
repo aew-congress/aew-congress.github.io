@@ -416,6 +416,12 @@ function CsmPrintPage({ program, evaluation }: { program: Program; evaluation: P
   const isGroup = evaluation.beneficiaryType === "Grupo";
   const categories = isGroup ? groupBeneficiaries : individualBeneficiaries;
   const beneficiaryIndex = categories.indexOf(evaluation.beneficiaryCategory ?? "");
+  const fallbackNameParts = String(evaluation.name ?? "").trim().split(/\s+/).filter(Boolean);
+  const hasNameParts = Boolean(evaluation.firstName || evaluation.middleName || evaluation.lastName || evaluation.suffix);
+  const printFirstName = evaluation.firstName || (!isGroup && !hasNameParts ? fallbackNameParts[0] ?? "" : "");
+  const printMiddleName = evaluation.middleName || (!isGroup && !hasNameParts && fallbackNameParts.length > 2 ? fallbackNameParts.slice(1, -1).join(" ") : "");
+  const printLastName = evaluation.lastName || (!isGroup && !hasNameParts && fallbackNameParts.length > 1 ? fallbackNameParts[fallbackNameParts.length - 1] : "");
+  const printGroupName = evaluation.groupName || (isGroup ? evaluation.name : "");
   const interventions = Array.isArray(evaluation.interventions) ? evaluation.interventions : [];
   const birthdateParts = String(evaluation.birthdate ?? "").split("-");
   const ratingValues = [evaluation.overallSatisfaction, ...Array.from({ length: 8 }, (_, index) => evaluation.qualityScores?.[index] ?? ""), evaluation.deliveryScore];
@@ -451,13 +457,13 @@ function CsmPrintPage({ program, evaluation }: { program: Program; evaluation: P
   return <article className="csm-print-page">
     <img className="csm-print-template" src="/csm_template.jpg" alt="" />
     <div className="csm-print-overlay">
-      <CsmPrintField x={365} y={29} width={830} height={16} fontSize={5.2} align="right" value={`PROGRAM: ${program.eventTitle}  |  DATE: ${csmPrintDateRange(program)}  |  VENUE: ${program.venue}`} />
+      <CsmPrintField x={365} y={29} width={830} height={16} fontSize={4.6} align="right" value={`PROGRAM: ${program.eventTitle}  |  DATE: ${csmPrintDateRange(program)}  |  VENUE: ${program.venue}`} />
       <CsmPrintField x={332} y={420} width={414} value={evaluation.registrationId} />
       <CsmPrintField x={923} y={420} width={258} value={evaluation.contactNo} />
-      <CsmPrintField x={332} y={458} width={846} value={evaluation.groupName} />
-      <CsmPrintField x={362} y={493} width={164} value={evaluation.firstName} />
-      <CsmPrintField x={540} y={493} width={172} value={evaluation.middleName} />
-      <CsmPrintField x={728} y={493} width={250} value={evaluation.lastName} />
+      <CsmPrintField x={332} y={458} width={846} value={printGroupName} />
+      <CsmPrintField x={362} y={493} width={164} value={printFirstName} />
+      <CsmPrintField x={540} y={493} width={172} value={printMiddleName} />
+      <CsmPrintField x={728} y={493} width={250} value={printLastName} />
       <CsmPrintField x={1004} y={493} width={174} value={evaluation.suffix} />
       <CsmPrintField x={361} y={541} width={158} value={evaluation.region} />
       <CsmPrintField x={526} y={541} width={156} value={evaluation.province} />
@@ -467,7 +473,7 @@ function CsmPrintPage({ program, evaluation }: { program: Program; evaluation: P
       <CsmPrintField x={899} y={582} width={52} value={birthdateParts[1]} align="center" />
       <CsmPrintField x={953} y={582} width={51} value={birthdateParts[2]} align="center" />
       <CsmPrintField x={1007} y={582} width={78} value={birthdateParts[0]} align="center" />
-      {evaluation.beneficiaryCategory === "Uban pa" && <CsmPrintField x={1063} y={359} width={115} height={16} fontSize={5} value={evaluation.beneficiaryOther} />}
+      {evaluation.beneficiaryCategory === "Uban pa" && <CsmPrintField x={1063} y={isGroup ? 359 : 331} width={115} height={16} fontSize={5} value={evaluation.beneficiaryOther} />}
       {interventions.includes("Uban pa") && <>
         <CsmPrintField x={1072} y={730} width={105} height={17} value={evaluation.interventionOtherQuantity} />
         <CsmPrintField x={510} y={730} width={669} height={17} value={evaluation.interventionOtherDetail} />
@@ -493,7 +499,8 @@ export function CsmEvaluationPrintButton({ program }: { program: Program }) {
     setNotice("");
     try {
       const snapshot = await getDocs(collection(db, "programEvaluations", program.id, "responses"));
-      const submitted = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ProgramEvaluation));
+      const submitted = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() } as ProgramEvaluation))
+        .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")) || a.id.localeCompare(b.id));
       if (!submitted.length) {
         setNotice("No submitted forms");
         return;

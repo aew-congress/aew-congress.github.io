@@ -911,13 +911,12 @@ img { -webkit-user-drag: none; user-select: none; }
 .manage-action-button--visible { color: #506b1d; background: #f0f6e4; border-color: #dfe9cd; }
 
 .contest-tabulation-page { display: none; }
-@page contest-tabulation { size: A4 portrait; margin: 0; }
 @media print {
   html:has(.contest-tabulation-print), body:has(.contest-tabulation-print) { width: 210mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
   body:has(.contest-tabulation-print) > *:not(.contest-tabulation-print) { display: none !important; }
   .contest-tabulation-print { display: block !important; position: static !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; color: #111 !important; background: #fff !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  .contest-tabulation-page { position: relative !important; display: block !important; width: 210mm !important; height: 297mm !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; background: #fff !important; page: contest-tabulation; break-after: page; page-break-after: always; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
-  .contest-tabulation-page:last-child { break-after: auto; page-break-after: auto; }
+  .contest-tabulation-page { position: relative !important; display: block !important; width: 210mm !important; height: calc(297mm - 1px) !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; background: #fff !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; }
+  .contest-tabulation-page + .contest-tabulation-page { break-before: page; page-break-before: always; }
   .contest-tabulation-page-frame { position: absolute !important; inset: 0 !important; display: block !important; width: 210mm !important; height: 297mm !important; max-width: none !important; object-fit: fill !important; }
   .contest-tabulation-page-content { position: absolute !important; inset: 44mm 17mm 34mm 18mm !important; z-index: 1 !important; color: #111 !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; line-height: 1.25 !important; }
   .contest-tabulation-page-content h1 { margin: 0 0 6mm !important; color: #111 !important; text-align: center !important; font-family: Cambria, Georgia, serif !important; font-size: 12pt !important; font-weight: 700 !important; letter-spacing: .04em !important; }

@@ -54,6 +54,94 @@ service cloud.firestore {
         && respondentUid.matches('guest-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}');
     }
 
+    function validRpRatings(data) {
+      return data.ratings is list
+        && data.ratings.size() == 5
+        && data.ratings[0] in [5, 4, 3, 2, 1, 'NA']
+        && data.ratings[1] in [5, 4, 3, 2, 1, 'NA']
+        && data.ratings[2] in [5, 4, 3, 2, 1, 'NA']
+        && data.ratings[3] in [5, 4, 3, 2, 1, 'NA']
+        && data.ratings[4] in [5, 4, 3, 2, 1, 'NA'];
+    }
+
+    function validRpProgram(data, programId) {
+      return exists(/databases/$(database)/documents/programs/$(programId))
+        && data.programTitle == get(/databases/$(database)/documents/programs/$(programId)).data.eventTitle
+        && data.dateFrom == get(/databases/$(database)/documents/programs/$(programId)).data.dateFrom
+        && data.dateTo == get(/databases/$(database)/documents/programs/$(programId)).data.dateTo
+        && data.venue == get(/databases/$(database)/documents/programs/$(programId)).data.venue;
+    }
+
+    function validRpSpeaker(data, speakerId) {
+      return exists(/databases/$(database)/documents/speakers/$(speakerId))
+        && data.speakerName == get(/databases/$(database)/documents/speakers/$(speakerId)).data.name;
+    }
+
+    function validRpMember(data, respondentUid) {
+      return signedIn()
+        && request.auth.uid == respondentUid
+        && (isRegularMember() || isAdmin())
+        && exists(/databases/$(database)/documents/userProfiles/$(respondentUid))
+        && data.respondentKind == 'member'
+        && data.respondentFirstName == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.firstName
+        && data.respondentMiddleName == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.middleName
+        && data.respondentLastName == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.lastName
+        && data.respondentSuffix == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.suffix
+        && data.respondentName == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.firstName
+          + (get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.middleName == '' ? '' : ' ' + get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.middleName)
+          + ' ' + get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.lastName
+          + (get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.suffix == '' ? '' : ' ' + get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.suffix)
+        && data.respondentSexAtBirth == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.sexAtBirth
+        && data.respondentAgency == get(/databases/$(database)/documents/userProfiles/$(respondentUid)).data.office;
+    }
+
+    function validRpGuest(data, respondentUid) {
+      return data.respondentKind == 'guest'
+        && data.respondentName is string
+        && data.respondentName.size() > 0
+        && data.respondentName.size() <= 180
+        && data.respondentSexAtBirth in ['Male', 'Female']
+        && data.respondentAgency is string
+        && data.respondentAgency.size() > 0
+        && data.respondentAgency.size() <= 240
+        && data.respondentFirstName == ''
+        && data.respondentMiddleName == ''
+        && data.respondentLastName == ''
+        && data.respondentSuffix == ''
+        && ((signedIn() && isEvaluationGuest() && request.auth.uid == respondentUid)
+          || isGuestEvaluationSession(respondentUid));
+    }
+
+    function validRpSubmission(data, programId, speakerId, respondentUid) {
+      return data.keys().hasAll([
+          'programId', 'programTitle', 'dateFrom', 'dateTo', 'venue',
+          'speakerId', 'speakerName', 'sessionTitle', 'respondentUid',
+          'respondentKind', 'respondentName', 'respondentFirstName',
+          'respondentMiddleName', 'respondentLastName', 'respondentSuffix',
+          'respondentSexAtBirth', 'respondentAgency', 'ratings',
+          'otherComments', 'submittedAt'
+        ])
+        && data.keys().hasOnly([
+          'programId', 'programTitle', 'dateFrom', 'dateTo', 'venue',
+          'speakerId', 'speakerName', 'sessionTitle', 'respondentUid',
+          'respondentKind', 'respondentName', 'respondentFirstName',
+          'respondentMiddleName', 'respondentLastName', 'respondentSuffix',
+          'respondentSexAtBirth', 'respondentAgency', 'ratings',
+          'otherComments', 'submittedAt'
+        ])
+        && data.programId == programId
+        && data.speakerId == speakerId
+        && data.respondentUid == respondentUid
+        && validRpProgram(data, programId)
+        && validRpSpeaker(data, speakerId)
+        && data.sessionTitle is string
+        && data.sessionTitle.size() <= 2000
+        && data.otherComments is string
+        && data.otherComments.size() <= 2000
+        && data.submittedAt == request.time
+        && validRpRatings(data);
+    }
+
     function isDesignatedJudge() {
       return verified()
         && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
@@ -221,6 +309,28 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['caDistributed'])
         && request.resource.data.caDistributed is bool;
       allow delete: if false;
+    }
+
+    match /resourcePersonEvaluations/{programId}/speakers/{speakerId}/rpSubmissions/{respondentUid} {
+      allow get: if isAdmin()
+        || (signedIn() && respondentUid == request.auth.uid
+          && (isRegularMember() || isAdmin() || isEvaluationGuest()))
+        || isGuestEvaluationSession(respondentUid);
+      allow list: if isAdmin();
+      allow create: if validRpSubmission(request.resource.data, programId, speakerId, respondentUid)
+        && (validRpMember(request.resource.data, respondentUid)
+          || validRpGuest(request.resource.data, respondentUid));
+      allow update, delete: if false;
+    }
+
+    // Required for admin collectionGroup queries across all program/speaker submissions.
+    match /{path=**}/rpSubmissions/{respondentUid} {
+      allow list: if isAdmin()
+        || (signedIn()
+          && resource.data.respondentUid == request.auth.uid
+          && (isRegularMember() || isEvaluationGuest()))
+        || (request.auth == null
+          && isGuestEvaluationSession(resource.data.respondentUid));
     }
 
     // Email documents are server-created and consumed by the Firebase Trigger Email extension.

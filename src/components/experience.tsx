@@ -3,7 +3,7 @@
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  addDoc, collection, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
+  addDoc, collection, collectionGroup, deleteField, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword, onAuthStateChanged, sendEmailVerification,
@@ -21,8 +21,9 @@ import sanitizeHtml from "sanitize-html";
 import { auth, db, AttendanceConfirmation, ContestJoin, ContestMechanics, ContestScoreSheet, ContestScoreTeam, ContestTeam, Material, MaterialCategory, MaterialFile, PersonProfileCard, PersonType, Program, ProgramSession, ResponsiblePerson, SpeakerAffiliation, SpeakerKeynoteSession, SUPERADMIN_EMAIL, UserProfile, UserRole } from "@/lib/firebase";
 import { uploadFiles, uploadthingDownloadEndpoint } from "@/lib/uploadthing";
 import { ProgramEvaluationMasterlistModal, ProgramEvaluationModal } from "@/components/program-evaluation";
+import { ResourcePersonEvaluationPage, ResourcePersonRatingModal } from "@/components/resource-person-evaluation";
 
-type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees";
+type Section = "home" | "programs" | "contests" | "contestMechanics" | "speakers" | "materials" | "approval" | "manage" | "confirmedAttendees" | "rpEvaluation";
 const categories: MaterialCategory[] = ["Guidelines", "Presentation", "References", "Worksheet", "Program Flow", "Communication Letter"];
 const resourceCategoryOrder: MaterialCategory[] = ["Presentation", ...categories.filter((category) => category !== "Presentation")];
 const START_ACCESS_CODE = "aew2026";
@@ -392,6 +393,9 @@ export default function Experience() {
   const [evaluationStatus, setEvaluationStatus] = useState<{ key: string; submitted: boolean; loading: boolean }>({ key: "", submitted: false, loading: false });
   const [evaluationProgram, setEvaluationProgram] = useState<Program | null>(null);
   const [evaluationMasterlistProgram, setEvaluationMasterlistProgram] = useState<Program | null>(null);
+  const [resourcePersonToRate, setResourcePersonToRate] = useState<PersonProfileCard | null>(null);
+  const [ratedResourcePersonIds, setRatedResourcePersonIds] = useState<Set<string>>(() => new Set());
+  const [ratedResourcePersonsLoading, setRatedResourcePersonsLoading] = useState(false);
   const [guestAuthError, setGuestAuthError] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "create" | "reset">("login");
@@ -466,12 +470,34 @@ export default function Experience() {
   const evaluationRespondentUid = isRegularMember && user
     ? user.uid
     : guestAccess && (!user || user.isAnonymous) ? guestEvaluationSessionId : "";
+  const resourcePersonRespondentUid = isAdmin || isRegularMember ? user?.uid ?? "" : guestAccess && (!user || user.isAnonymous) ? guestEvaluationSessionId : "";
   const evaluationKey = selectedProgram && evaluationRespondentUid ? `${selectedProgram.id}:${evaluationRespondentUid}` : "";
   const evaluationButtonVisible = canEvaluate && selectedProgram?.evaluationRevealed === true;
   const evaluationChecking = evaluationButtonVisible && !guestAuthError && (!evaluationKey || evaluationStatus.key !== evaluationKey || evaluationStatus.loading);
   const evaluationSubmitted = Boolean(evaluationKey && evaluationStatus.key === evaluationKey && evaluationStatus.submitted);
   const attendanceChecking = isRegularMember && (!attendanceConfirmationId || attendanceStatus.id !== attendanceConfirmationId || attendanceStatus.loading);
   const attendanceConfirmed = isRegularMember && attendanceStatus.id === attendanceConfirmationId && attendanceStatus.confirmed;
+
+  useEffect(() => {
+    if (!resourcePersonRespondentUid) {
+      setRatedResourcePersonIds(new Set());
+      setRatedResourcePersonsLoading(false);
+      return;
+    }
+    setRatedResourcePersonIds(new Set());
+    setRatedResourcePersonsLoading(true);
+    const ownRatings = query(collectionGroup(db, "rpSubmissions"), where("respondentUid", "==", resourcePersonRespondentUid));
+    return onSnapshot(ownRatings, (snapshot) => {
+      const speakerIds = snapshot.docs
+        .map((entry) => entry.data().speakerId)
+        .filter((speakerId): speakerId is string => typeof speakerId === "string" && speakerId.length > 0);
+      setRatedResourcePersonIds(new Set(speakerIds));
+      setRatedResourcePersonsLoading(false);
+    }, () => {
+      setRatedResourcePersonIds(new Set());
+      setRatedResourcePersonsLoading(false);
+    });
+  }, [resourcePersonRespondentUid]);
 
   useEffect(() => {
     if (!isRegularMember || !attendanceConfirmationId) {
@@ -866,6 +892,11 @@ export default function Experience() {
   function openMaterialEditor(material: Material | null = null) { setEditingMaterial(material); setMaterialModal(true); }
   function openMechanicsEditor(mechanics: ContestMechanics | null = null) { setEditingMechanics(mechanics); setContestMechanicsModal(true); }
   function openSpeakerEditor(speaker: PersonProfileCard | null = null) { setEditingSpeaker(speaker); setSpeakerModal(true); }
+  function openResourcePersonRating(speaker: PersonProfileCard) {
+    if (!isAdmin && !isRegularMember && !guestAccess) { setStartAccessOpen(true); return; }
+    if (!resourcePersonRespondentUid) { setToast({ kind: "error", text: "Your evaluation session is not ready. Refresh the page and try again." }); return; }
+    setResourcePersonToRate(speaker);
+  }
 
   async function getVerifiedAdmin() {
     const current = auth.currentUser;
@@ -1103,7 +1134,7 @@ export default function Experience() {
         setSelectedProgramId(editingProgram.id);
         setToast({ kind: "success", text: "Program updated." });
       } else {
-        const created = await addDoc(collection(db, "programs"), { ...payload, evaluationRevealed: false, createdBy: adminUser.uid });
+        const created = await addDoc(collection(db, "programs"), { ...payload, evaluationRevealed: false, rpEvaluationRevealed: false, createdBy: adminUser.uid });
         setSelectedProgramId(created.id);
         setToast({ kind: "success", text: "Program published." });
       }
@@ -1214,6 +1245,16 @@ export default function Experience() {
       await updateDoc(doc(db, "programs", program.id), { evaluationRevealed, updatedAt: serverTimestamp() });
       setEvaluationMasterlistProgram((current) => current?.id === program.id ? { ...current, evaluationRevealed } : current);
       setToast({ kind: "success", text: evaluationRevealed ? `Evaluate is now visible for ${program.eventTitle}.` : `Evaluate is now hidden for ${program.eventTitle}.` });
+    } catch (error) { showError(error); }
+  }
+
+  async function toggleResourcePersonRateVisibility(program: Program) {
+    if (!user || !isAdmin) return;
+    const rpEvaluationRevealed = program.rpEvaluationRevealed !== true;
+    try {
+      await getVerifiedAdmin();
+      await updateDoc(doc(db, "programs", program.id), { rpEvaluationRevealed, updatedAt: serverTimestamp() });
+      setToast({ kind: "success", text: rpEvaluationRevealed ? `Rate buttons are now visible for ${program.eventTitle}.` : `Rate buttons are now hidden for ${program.eventTitle}.` });
     } catch (error) { showError(error); }
   }
 
@@ -1535,6 +1576,7 @@ export default function Experience() {
   async function logout() {
     setGuestAccess(false);
     setGuestEvaluationSessionId("");
+    setRatedResourcePersonIds(new Set());
     setGuestAuthError("");
     try {
       window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY);
@@ -1591,6 +1633,7 @@ export default function Experience() {
   async function exitGuestAccess() {
     setGuestAccess(false);
     setGuestEvaluationSessionId("");
+    setRatedResourcePersonIds(new Set());
     setGuestAuthError("");
     try {
       window.localStorage.removeItem(GUEST_ACCESS_STORAGE_KEY);
@@ -1612,6 +1655,7 @@ export default function Experience() {
     { id: "speakers", label: "People" },
     { id: "manage", label: "Manage Content" },
     { id: "confirmedAttendees", label: "Confirmed Attendees" },
+    { id: "rpEvaluation", label: "RP Evaluation" },
     ...(isSuperadmin ? [{ id: "approval" as Section, label: "User Approval" }] : []),
   ];
   const isAdminNavActive = adminNavItems.some((item) => item.id === section);
@@ -1656,12 +1700,14 @@ export default function Experience() {
           <ManageDashboard programs={programs} materials={materials} mechanics={contestMechanics} onAddProgram={() => openProgramEditor()} onEditProgram={openProgramEditor} onDeleteProgram={(program) => setDeleteTarget({ kind: "program", id: program.id, label: program.eventTitle })} onViewEvaluations={setEvaluationMasterlistProgram} onAddMaterial={() => openMaterialEditor()} onEditMaterial={openMaterialEditor} onDeleteMaterial={(material) => setDeleteTarget({ kind: "material", id: material.id, label: material.name })} onToggleMaterialVisibility={toggleMaterialVisibility} onEditMechanics={openMechanicsEditor} onDeleteMechanics={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onAddMechanics={() => openMechanicsEditor()} backLabel={isSuperadmin ? "Back to approvals" : "Back to home"} onBack={() => setSection(isSuperadmin ? "approval" : "home")} />
         ) : section === "confirmedAttendees" && isAdmin ? (
           <ConfirmedAttendeesPage programs={programs} selectedProgramId={selectedProgram?.id ?? ""} onSelectProgram={(id) => { setSelectedProgramId(id); setSelectedDay(0); }} confirmations={attendanceConfirmations} profiles={profiles} loading={attendanceConfirmationsLoading || profilesLoading} />
+        ) : section === "rpEvaluation" && isAdmin ? (
+          <ResourcePersonEvaluationPage programs={programs} speakers={speakers} onToggleRateVisibility={toggleResourcePersonRateVisibility} />
         ) : section === "contestMechanics" && isAdmin ? (
           <ContestMechanicsPage mechanics={contestMechanics} joins={contestJoins} profiles={profiles} contestantsLoading={contestJoinsLoading || profilesLoading} confirmingJoinId={confirmingJoinId} onConfirmContestant={confirmContestant} programs={programs} loading={contestMechanicsLoading} isSuperadmin={isSuperadmin} onToggleRankingVisibility={toggleContestRankingVisibility} onAdd={() => openMechanicsEditor()} onEdit={openMechanicsEditor} onDelete={(mechanics) => setDeleteTarget({ kind: "mechanics", id: mechanics.id, label: mechanics.contest })} onSaveTeams={saveContestTeams} />
         ) : section === "contests" && (isApprovedMember || guestAccess || canJudgeContests) ? (
           <ContestsPage contests={contestMechanics} programs={programs} joinedContestIds={joinedContestIds} joinedContestStatuses={joinedContestStatuses} joiningContestId={joiningContestId} loading={contestMechanicsLoading} canJoin={isRegularMember} canJudge={canJudgeContests} judgeUid={user?.uid ?? ""} onJoin={(contest) => setContestJoinConfirm(contest)} />
         ) : section === "speakers" ? (
-          <SpeakersPage speakers={speakers} programs={programs} contestMechanics={contestMechanics} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} />
+          <SpeakersPage speakers={speakers} programs={programs} contestMechanics={contestMechanics} isAdmin={isAdmin} loading={speakersLoading} onAdd={() => openSpeakerEditor()} onEdit={openSpeakerEditor} onDelete={(speaker) => setDeleteTarget({ kind: "speaker", id: speaker.id, label: speaker.name })} onRate={openResourcePersonRating} ratedSpeakerIds={ratedResourcePersonIds} ratedStatusesLoading={ratedResourcePersonsLoading} />
         ) : section === "materials" ? (
           <MaterialsPage materials={materials} programs={programs} isAdmin={isAdmin} isRegularMember={isRegularMember || guestAccess} onAdd={() => openMaterialEditor()} onDownload={downloadMaterial} loading={loading} />
         ) : (
@@ -1731,6 +1777,7 @@ export default function Experience() {
       {attendanceConfirmOpen && selectedProgram && <AttendanceConfirmationModal programTitle={selectedProgram.eventTitle} busy={attendanceSubmitting} onCancel={() => !attendanceSubmitting && setAttendanceConfirmOpen(false)} onConfirm={submitAttendanceConfirmation} />}
       {evaluationProgram && evaluationRespondentUid && <ProgramEvaluationModal key={`${evaluationProgram.id}:${evaluationRespondentUid}`} program={evaluationProgram} respondentUid={evaluationRespondentUid} respondentKind={isRegularMember ? "member" : "guest"} onClose={() => setEvaluationProgram(null)} onSubmitted={() => { setEvaluationStatus({ key: evaluationKey, submitted: true, loading: false }); setEvaluationProgram(null); setToast({ kind: "success", text: "Salamat sa imong feedback. Na-submit na ang evaluation." }); }} />}
       {evaluationMasterlistProgram && <ProgramEvaluationMasterlistModal program={evaluationMasterlistProgram} canManageVisibility={isAdmin} onToggleVisibility={toggleProgramEvaluationVisibility} onClose={() => setEvaluationMasterlistProgram(null)} />}
+      {resourcePersonToRate && <ResourcePersonRatingModal key={`${resourcePersonToRate.id}:${resourcePersonRespondentUid}`} speaker={resourcePersonToRate} programs={programs} respondentUid={resourcePersonRespondentUid} respondentKind={isAdmin || isRegularMember ? "member" : "guest"} profile={activeProfile} onClose={() => setResourcePersonToRate(null)} onSubmitted={(speakerId) => { setRatedResourcePersonIds((current) => new Set(current).add(speakerId)); setResourcePersonToRate(null); setToast({ kind: "success", text: guestAccess ? "Thank you. To rate again, exit guest access and enter the access code again." : "Thank you. Your Resource Person Evaluation has been submitted." }); }} />}
       {contestJoinConfirm && <ContestJoinConfirmationModal contestName={contestJoinConfirm.contest} eventTitle={contestJoinConfirm.eventTitle} busy={joiningContestId === contestJoinConfirm.id} onCancel={() => !joiningContestId && setContestJoinConfirm(null)} onConfirm={confirmContestJoin} />}
       {startAccessOpen && <StartAccessModal onClose={() => setStartAccessOpen(false)} onEnter={enterGuestAccess} />}
       {authOpen && <AuthModal mode={authMode} setMode={setAuthMode} onClose={() => setAuthOpen(false)} onLogin={handleLogin} onCreate={handleCreateAccount} onForgot={handleForgotPassword} />}
@@ -1820,7 +1867,7 @@ function ProgramFilterDropdown({ id, programs, value, onChange, className = "", 
   </div>;
 }
 
-function SpeakersPage({ speakers, programs, contestMechanics, isAdmin, loading, onAdd, onEdit, onDelete }: {
+function SpeakersPage({ speakers, programs, contestMechanics, isAdmin, loading, onAdd, onEdit, onDelete, onRate, ratedSpeakerIds, ratedStatusesLoading }: {
   speakers: PersonProfileCard[];
   programs: Program[];
   contestMechanics: ContestMechanics[];
@@ -1829,6 +1876,9 @@ function SpeakersPage({ speakers, programs, contestMechanics, isAdmin, loading, 
   onAdd: () => void;
   onEdit: (speaker: PersonProfileCard) => void;
   onDelete: (speaker: PersonProfileCard) => void;
+  onRate: (speaker: PersonProfileCard) => void;
+  ratedSpeakerIds: Set<string>;
+  ratedStatusesLoading: boolean;
 }) {
   const [programFilter, setProgramFilter] = useState("");
   const [peopleType, setPeopleType] = useState<PersonType>("Speaker");
@@ -1898,7 +1948,7 @@ function SpeakersPage({ speakers, programs, contestMechanics, isAdmin, loading, 
       return <article className="speaker-profile-card" key={speaker.id} style={{ animationDelay: `${index * 45}ms` }}>
         <div className="speaker-profile-photo">
           <img src={speaker.imageUrl} alt={`${speaker.name} profile`} loading="lazy" />
-          {isAdmin && <div className="speaker-profile-actions"><button type="button" aria-label={`Edit ${speaker.name}`} title="Edit profile" onClick={() => onEdit(speaker)}><Pencil size={15} /></button><button type="button" aria-label={`Delete ${speaker.name}`} title="Delete profile" onClick={() => onDelete(speaker)}><Trash2 size={15} /></button></div>}
+          {(peopleType === "Speaker" || isAdmin) && <div className="speaker-profile-actions">{isAdmin && <><button type="button" aria-label={`Edit ${speaker.name}`} title="Edit profile" onClick={() => onEdit(speaker)}><Pencil size={15} /></button><button type="button" aria-label={`Delete ${speaker.name}`} title="Delete profile" onClick={() => onDelete(speaker)}><Trash2 size={15} /></button></>}{peopleType === "Speaker" && programsById.get(speaker.programId)?.rpEvaluationRevealed === true && <button className="speaker-rate-button" type="button" onClick={() => onRate(speaker)} disabled={ratedSpeakerIds.has(speaker.id) || ratedStatusesLoading} aria-label={ratedSpeakerIds.has(speaker.id) ? `Rated ${speaker.name}` : `Rate ${speaker.name}`} title={ratedSpeakerIds.has(speaker.id) ? "You have already rated this resource person" : undefined}>{ratedSpeakerIds.has(speaker.id) ? "Rated" : "Rate"}</button>}</div>}
           <div className="speaker-profile-title"><span className="eyebrow">CONGRESS {peopleType.toLocaleUpperCase()}</span><h3 title={displayName}>{displayName}</h3><p><span>{speaker.designation}</span><i />{speaker.office}</p></div>
         </div>
         <div className="speaker-profile-details">
@@ -2491,7 +2541,7 @@ function ContestRankingsModal({ contest, onClose }: { contest: ContestMechanics;
       <div className="form-modal-actions"><button className="button button--soft" onClick={onClose}>Close</button></div>
     </section>
     </div>
-    {typeof document !== "undefined" && createPortal(<div className="contest-tabulation-print" aria-hidden="true">
+    {typeof document !== "undefined" && createPortal(<div className="contest-tabulation-print" style={{ height: `calc(${printPages.length * 297}mm - 1px)` }} aria-hidden="true">
       {printPages.map((pageRows, pageIndex) => <section className="contest-tabulation-page" key={`print-page-${pageIndex}`}>
         <img className="contest-tabulation-page-frame" src="/a4_size_header_footer.jpg" alt="" />
         <div className="contest-tabulation-page-content">

@@ -71,6 +71,8 @@ export type Program = {
   keynoteTopics?: ProgramKeynoteTopic[];
   /** Controls whether regular members and guests can access the evaluation form. */
   evaluationRevealed?: boolean;
+  /** Controls whether resource-person rating buttons are shown on speaker profiles. */
+  rpEvaluationRevealed?: boolean;
   flow: ProgramSession[];
 };
 
@@ -164,6 +166,30 @@ export type ProgramEvaluation = {
   deliveryScore: string;
   suggestions: string;
   caDistributed: boolean;
+  submittedAt?: unknown;
+};
+
+export type ResourcePersonEvaluation = {
+  id: string;
+  programId: string;
+  programTitle: string;
+  dateFrom: string;
+  dateTo: string;
+  venue: string;
+  speakerId: string;
+  speakerName: string;
+  sessionTitle: string;
+  respondentUid: string;
+  respondentKind: "member" | "guest";
+  respondentName: string;
+  respondentFirstName: string;
+  respondentMiddleName: string;
+  respondentLastName: string;
+  respondentSuffix: string;
+  respondentSexAtBirth: "Male" | "Female";
+  respondentAgency: string;
+  ratings: Array<5 | 4 | 3 | 2 | 1 | "NA">;
+  otherComments: string;
   submittedAt?: unknown;
 };
 
